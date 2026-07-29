@@ -8,6 +8,8 @@ from __future__ import annotations
 
 import inspect
 
+import pytest
+
 from hookrelay import filters
 
 # ============================================================
@@ -171,12 +173,382 @@ class TestRequestFilterBehavioral:
         assert len(result) == 1
         assert result[0]["path"] == "/hooks"
 
-    def test_behavior_build_filter_creates_preconfigured_filter(self):
-        f = filters.build_filter(method="POST", source="203.0.113.1")
-        assert isinstance(f, filters.RequestFilter)
+# ============================================================
+# v0.4.0: Advanced filtering — interface tests
+# ============================================================
+
+
+class TestRequestFilterAdvancedInterface:
+    """Verify new v0.4.0 methods exist on RequestFilter."""
+
+    def test_by_body_exists(self):
+        assert hasattr(filters.RequestFilter, "by_body")
+        assert callable(filters.RequestFilter.by_body)
+
+    def test_by_body_signature(self):
+        sig = inspect.signature(filters.RequestFilter.by_body)
+        assert "pattern" in sig.parameters
+
+    def test_by_header_regex_exists(self):
+        assert hasattr(filters.RequestFilter, "by_header_regex")
+        assert callable(filters.RequestFilter.by_header_regex)
+
+    def test_by_header_regex_signature(self):
+        sig = inspect.signature(filters.RequestFilter.by_header_regex)
+        assert "name" in sig.parameters
+        assert "pattern" in sig.parameters
+
+    def test_by_json_field_exists(self):
+        assert hasattr(filters.RequestFilter, "by_json_field")
+        assert callable(filters.RequestFilter.by_json_field)
+
+    def test_by_json_field_signature(self):
+        sig = inspect.signature(filters.RequestFilter.by_json_field)
+        assert "path" in sig.parameters
+        assert "pattern" in sig.parameters
+
+
+class TestFilterPresetInterface:
+    """Verify FilterPreset class and methods exist."""
+
+    def test_filter_preset_class_exists(self):
+        assert hasattr(filters, "FilterPreset")
+        assert inspect.isclass(filters.FilterPreset)
+
+    def test_filter_preset_apply_exists(self):
+        assert hasattr(filters.FilterPreset, "apply")
+        assert callable(filters.FilterPreset.apply)
+
+    def test_filter_preset_apply_signature(self):
+        sig = inspect.signature(filters.FilterPreset.apply)
+        assert "name" in sig.parameters
+        assert "requests" in sig.parameters
+
+    def test_filter_preset_list_exists(self):
+        assert hasattr(filters.FilterPreset, "list")
+        assert callable(filters.FilterPreset.list)
+
+
+class TestFilterChainInterface:
+    """Verify FilterChain class and methods exist."""
+
+    def test_filter_chain_class_exists(self):
+        assert hasattr(filters, "FilterChain")
+        assert inspect.isclass(filters.FilterChain)
+
+    def test_filter_chain_all_exists(self):
+        assert hasattr(filters.FilterChain, "all")
+        assert callable(filters.FilterChain.all)
+
+    def test_filter_chain_any_exists(self):
+        assert hasattr(filters.FilterChain, "any")
+        assert callable(filters.FilterChain.any)
+
+    def test_filter_chain_not_exists(self):
+        assert hasattr(filters.FilterChain, "not_")
+        assert callable(filters.FilterChain.not_)
+
+
+class TestFilterExpressionParserInterface:
+    """Verify FilterExpressionParser class and methods exist."""
+
+    def test_expression_parser_class_exists(self):
+        assert hasattr(filters, "FilterExpressionParser")
+        assert inspect.isclass(filters.FilterExpressionParser)
+
+    def test_expression_parser_parse_exists(self):
+        assert hasattr(filters.FilterExpressionParser, "parse")
+        assert callable(filters.FilterExpressionParser.parse)
+
+    def test_expression_parser_parse_signature(self):
+        sig = inspect.signature(filters.FilterExpressionParser.parse)
+        assert "expression" in sig.parameters
+
+
+# ============================================================
+# v0.4.0: Advanced filtering — behavioral tests (GREEN phase)
+# ============================================================
+
+
+class TestRequestFilterAdvancedBehavioral:
+    """Calling new v0.4.0 methods works correctly."""
+
+    def test_behavior_by_body_matches_text_body(self):
+        f = filters.RequestFilter().by_body(r"test.*pattern")
         requests = [
-            {"method": "POST", "path": "/hook", "source_ip": "203.0.113.1"},
-            {"method": "POST", "path": "/hook", "source_ip": "10.0.0.1"},
+            {"body": b"this is a test pattern here"},
+            {"body": b"no match here"},
         ]
         result = f.apply(requests)
         assert len(result) == 1
+
+    def test_behavior_by_body_returns_self(self):
+        f = filters.RequestFilter()
+        result = f.by_body("pattern")
+        assert result is f  # chaining support
+
+    def test_behavior_by_body_with_empty_pattern(self):
+        f = filters.RequestFilter().by_body("")
+        requests = [
+            {"body": b"anything"},
+            {"body": b""},
+        ]
+        result = f.apply(requests)
+        # Empty pattern matches everything
+        assert len(result) == 2
+
+    def test_behavior_by_body_with_binary_body(self):
+        f = filters.RequestFilter().by_body(r".*")
+        requests = [
+            {"body": b"hello"},
+            # Non-decodable bytes
+            {"body": b"\xff\xfe\x00\x01"},
+        ]
+        result = f.apply(requests)
+        # Binary body is skipped (not matched), only first matches
+        assert len(result) == 1
+
+    def test_behavior_by_header_regex_matches(self):
+        f = filters.RequestFilter().by_header_regex("X-Custom", r"val.*")
+        requests = [
+            {"headers": {"X-Custom": "value123"}},
+            {"headers": {"X-Custom": "other"}},
+        ]
+        result = f.apply(requests)
+        assert len(result) == 1
+
+    def test_behavior_by_header_regex_with_empty_name(self):
+        f = filters.RequestFilter().by_header_regex("", r".*")
+        requests = [{"headers": {"X-Custom": "value"}}]
+        result = f.apply(requests)
+        # Empty header name — won't match any header
+        assert len(result) == 0
+
+    def test_behavior_by_header_regex_with_empty_pattern(self):
+        f = filters.RequestFilter().by_header_regex("X-Custom", "")
+        requests = [{"headers": {"X-Custom": "value"}}]
+        result = f.apply(requests)
+        # Empty pattern matches everything
+        assert len(result) == 1
+
+    def test_behavior_by_header_regex_with_invalid_regex(self):
+        f = filters.RequestFilter().by_header_regex("X-Custom", r"[invalid")
+        requests = [{"headers": {"X-Custom": "value"}}]
+        result = f.apply(requests)
+        # Invalid regex — no match
+        assert len(result) == 0
+
+    def test_behavior_by_json_field_matches(self):
+        f = filters.RequestFilter().by_json_field("data.event", r"^evt_")
+        requests = [
+            {"body": b'{"data": {"event": "evt_123"}}'},
+            {"body": b'{"data": {"event": "other"}}'},
+        ]
+        result = f.apply(requests)
+        assert len(result) == 1
+
+    def test_behavior_by_json_field_empty_path(self):
+        f = filters.RequestFilter().by_json_field("", r".*")
+        requests = [{"body": b'{"key": "value"}'}]
+        result = f.apply(requests)
+        # Empty path — no extraction
+        assert len(result) == 0
+
+    def test_behavior_by_json_field_empty_pattern(self):
+        f = filters.RequestFilter().by_json_field("data.event", "")
+        requests = [{"body": b'{"data": {"event": "evt_123"}}'}]
+        result = f.apply(requests)
+        # Empty pattern matches everything
+        assert len(result) == 1
+
+    def test_behavior_by_json_field_nested_path(self):
+        f = filters.RequestFilter().by_json_field("data.object.id", r"^evt_")
+        requests = [
+            {
+                "body": b'{"data": {"object": {"id": "evt_123"}}}'
+            },
+            {"body": b'{"data": {"object": {"id": "other"}}}'},
+        ]
+        result = f.apply(requests)
+        assert len(result) == 1
+
+    def test_behavior_by_json_field_missing_field(self):
+        f = filters.RequestFilter().by_json_field("nonexistent.field", r".*")
+        requests = [{"body": b'{"data": {"event": "test"}}'}]
+        result = f.apply(requests)
+        assert len(result) == 0
+
+
+class TestFilterPresetBehavioral:
+    """Calling FilterPreset methods works correctly."""
+
+    def test_behavior_filter_preset_apply_stripe(self):
+        reqs = [{"body": b'{"type": "charge.completed"}'}]
+        result = filters.FilterPreset.apply("stripe", reqs)
+        assert len(result) == 1
+
+    def test_behavior_filter_preset_apply_with_requests(self):
+        reqs = [
+            {"method": "POST", "body": b'{"type": "charge.completed"}'},
+            {"method": "GET", "body": b'{"type": "ping"}'},
+        ]
+        result = filters.FilterPreset.apply("stripe", reqs)
+        assert len(result) == 1  # only charge/..., not ping
+
+    def test_behavior_filter_preset_list_returns_names(self):
+        names = filters.FilterPreset.list()
+        assert isinstance(names, list)
+        assert "stripe" in names
+        assert "github" in names
+        assert "post" in names
+        assert "get" in names
+
+    def test_behavior_filter_preset_apply_http_methods(self):
+        reqs = [
+            {"method": "POST", "path": "/hook"},
+            {"method": "GET", "path": "/health"},
+        ]
+        result = filters.FilterPreset.apply("post", reqs)
+        assert len(result) == 1
+        assert result[0]["method"] == "POST"
+
+    def test_behavior_filter_preset_apply_unknown_raises(self):
+        import pytest
+        with pytest.raises(ValueError):
+            filters.FilterPreset.apply("nonexistent", [])
+
+
+class TestFilterChainBehavioral:
+    """Calling FilterChain methods works correctly."""
+
+    def test_behavior_chain_all_returns_request_filter(self):
+        result = filters.FilterChain.all()
+        from hookrelay.filters import RequestFilter
+        assert isinstance(result, RequestFilter)
+
+    def test_behavior_chain_all_with_filters(self):
+        f1 = filters.RequestFilter().by_method("POST")
+        f2 = filters.RequestFilter().by_path("/hooks")
+        combined = filters.FilterChain.all(f1, f2)
+        requests = [
+            {"method": "POST", "path": "/hooks"},
+            {"method": "POST", "path": "/other"},
+            {"method": "GET", "path": "/hooks"},
+        ]
+        result = combined.apply(requests)
+        assert len(result) == 1
+        assert result[0]["path"] == "/hooks"
+        assert result[0]["method"] == "POST"
+
+    def test_behavior_chain_any_returns_request_filter(self):
+        result = filters.FilterChain.any()
+        from hookrelay.filters import RequestFilter
+        assert isinstance(result, RequestFilter)
+
+    def test_behavior_chain_any_with_filters(self):
+        f1 = filters.RequestFilter().by_method("POST")
+        f2 = filters.RequestFilter().by_method("GET")
+        combined = filters.FilterChain.any(f1, f2)
+        requests = [
+            {"method": "POST", "path": "/hook"},
+            {"method": "GET", "path": "/health"},
+            {"method": "PUT", "path": "/update"},
+        ]
+        result = combined.apply(requests)
+        assert len(result) == 2
+
+    def test_behavior_chain_not_returns_request_filter(self):
+        f = filters.RequestFilter().by_method("POST")
+        result = filters.FilterChain.not_(f)
+        from hookrelay.filters import RequestFilter
+        assert isinstance(result, RequestFilter)
+
+    def test_behavior_chain_not_with_filter(self):
+        f = filters.RequestFilter().by_method("POST")
+        not_f = filters.FilterChain.not_(f)
+        requests = [
+            {"method": "POST", "path": "/hook"},
+            {"method": "GET", "path": "/health"},
+        ]
+        result = not_f.apply(requests)
+        assert len(result) == 1
+        assert result[0]["method"] == "GET"
+
+    def test_behavior_chain_nested_composition(self):
+        f1 = filters.RequestFilter().by_method("POST")
+        f2 = filters.RequestFilter().by_path("/hooks")
+        f3 = filters.RequestFilter().by_method("GET")
+        combined = filters.FilterChain.any(
+            filters.FilterChain.all(f1, f2),
+            filters.FilterChain.not_(f3),
+        )
+        requests = [
+            {"method": "POST", "path": "/hooks"},
+            {"method": "GET", "path": "/hooks"},
+            {"method": "PUT", "path": "/hooks"},
+        ]
+        result = combined.apply(requests)
+        assert len(result) == 2  # POST+hooks + not(GET)
+
+
+class TestFilterExpressionParserBehavioral:
+    """FilterExpressionParser works correctly."""
+
+    def test_behavior_parse_simple_expression(self):
+        result = filters.FilterExpressionParser.parse("method=POST")
+        from hookrelay.filters import RequestFilter
+        assert isinstance(result, RequestFilter)
+        requests = [
+            {"method": "POST", "path": "/hook"},
+            {"method": "GET", "path": "/health"},
+        ]
+        matched = result.apply(requests)
+        assert len(matched) == 1
+
+    def test_behavior_parse_with_regex_operator(self):
+        result = filters.FilterExpressionParser.parse("path~^/stripe")
+        requests = [
+            {"method": "POST", "path": "/stripe/hooks"},
+            {"method": "POST", "path": "/other"},
+        ]
+        matched = result.apply(requests)
+        assert len(matched) == 1
+
+    def test_behavior_parse_with_and(self):
+        result = filters.FilterExpressionParser.parse(
+            "method=POST AND path~^/stripe"
+        )
+        requests = [
+            {"method": "POST", "path": "/stripe/hooks"},
+            {"method": "POST", "path": "/other"},
+            {"method": "GET", "path": "/stripe/hooks"},
+        ]
+        matched = result.apply(requests)
+        assert len(matched) == 1
+
+    def test_behavior_parse_with_json_field(self):
+        result = filters.FilterExpressionParser.parse(
+            "body.type~^charge"
+        )
+        requests = [
+            {"body": b'{"type": "charge.completed"}'},
+            {"body": b'{"type": "ping"}'},
+        ]
+        matched = result.apply(requests)
+        assert len(matched) == 1
+
+    def test_behavior_parse_empty_string(self):
+        result = filters.FilterExpressionParser.parse("")
+        from hookrelay.filters import RequestFilter
+        assert isinstance(result, RequestFilter)
+
+    def test_behavior_parse_with_header_regex(self):
+        result = filters.FilterExpressionParser.parse(
+            "header.X-GitHub-Event~^push"
+        )
+        requests = [
+            {"headers": {"X-GitHub-Event": "push"}},
+            {"headers": {"X-GitHub-Event": "pull_request"}},
+        ]
+        matched = result.apply(requests)
+        assert len(matched) == 1

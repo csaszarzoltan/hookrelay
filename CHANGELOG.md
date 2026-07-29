@@ -5,6 +5,30 @@ All notable changes to **hookrelay** are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.0] — 2026-07-29
+
+### Features
+
+- **Regex Payload Filtering** — `RequestFilter.by_body()`, `by_header_regex()`, `by_json_field()` for regex-based matching on body content, header values, and nested JSON fields via dot-path expressions
+- **Conditional Routing Rules** — `RoutingRule` data model and `RouterEngine` with priority-based first-match-wins evaluation; supports channel-scoped conditions, fallback catch-all rules, and max forward count limits
+- **Filter Presets** — `FilterPreset` class with built-in presets for Stripe (`charge`/`payment`/`invoice` events), GitHub (X-GitHub-Event + action field), Slack (event type / challenge), HTTP methods, and status code ranges (`2xx`, `4xx`, `5xx`)
+- **Filter Chain Composition** — `FilterChain` combinators (`all()`, `any()`, `not_()`) for AND/OR/NOT filter composition and nesting
+- **Filter Expression Language** — `FilterExpressionParser` parses string expressions like `method=POST path~^/webhook body.event.type~evt_` into `RequestFilter` instances, supporting `=`, `!=`, and `~` (regex) operators
+- **Saved Filter Sets** — Persist, load, list, and delete named filter sets via `Storage.save_filter_set()` and related CRUD methods
+- **Routing Rule Storage** — SQLite persistence for routing rules with `Storage.save_routing_rule()`, `list_routing_rules()`, `update_routing_rule()`, `delete_routing_rule()`, `reorder_routing_rules()`
+- **Filter Execution History** — `Storage.log_filter_execution()` and `query_filter_history()` for auditing which filters matched which requests
+
+### New Files
+
+- `src/hookrelay/routing.py` — RoutingRule model and RouterEngine (182 lines)
+- `tests/test_routing.py` — Routing rule interface and behavioral tests (299 lines)
+- `tests/test_storage_filters.py` — Filter/Routing storage persistence tests (343 lines)
+
+### Tests
+
+- 117 new tests across 4 test modules (advanced filtering interface/behavioral, routing, filter/storage persistence)
+- 447 total tests (up from 330 in v0.3.0)
+
 ## [0.3.0] — 2026-07-29
 
 ### Features

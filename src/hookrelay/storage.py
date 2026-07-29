@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+from datetime import UTC, datetime
 from typing import Any
 from uuid import uuid4
 
@@ -232,6 +233,249 @@ class Storage:
             END;
         """)
         self._conn.commit()
+
+    # ============================================================
+    # v0.4.0: Filter sets, routing rules, and filter history
+    # ============================================================
+
+    def _init_filter_tables(self) -> None:
+        """Create filter_sets, routing_rules, and filter_history tables."""
+        self._conn.executescript("""
+            CREATE TABLE IF NOT EXISTS filter_sets (
+                filter_set_id TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                channel TEXT NOT NULL,
+                filter_expression TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_filter_sets_channel ON filter_sets(channel);
+
+            CREATE TABLE IF NOT EXISTS routing_rules (
+                rule_id TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                channel TEXT NOT NULL,
+                enabled INTEGER NOT NULL DEFAULT 1,
+                priority INTEGER NOT NULL DEFAULT 100,
+                condition TEXT,
+                target_endpoint TEXT,
+                max_forward_count INTEGER,
+                fallback INTEGER NOT NULL DEFAULT 0,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_routing_rules_channel ON routing_rules(channel);
+
+            CREATE TABLE IF NOT EXISTS filter_history (
+                history_id TEXT PRIMARY KEY,
+                filter_set_id TEXT NOT NULL,
+                request_id TEXT NOT NULL,
+                matched INTEGER NOT NULL DEFAULT 0,
+                matched_criteria TEXT,
+                executed_at TEXT NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_filter_history_set ON filter_history(filter_set_id);
+            CREATE INDEX IF NOT EXISTS idx_filter_history_request ON filter_history(request_id);
+        """)
+        self._conn.commit()
+
+    def save_filter_set(
+        self, name: str, channel: str, filter_expression: str
+    ) -> str:
+        """Save a named filter set and return its ID."""
+        self._init_filter_tables()
+        filter_set_id = uuid4().hex
+        now = datetime.now(UTC).isoformat()
+        self._conn.execute(
+            """INSERT INTO filter_sets
+               (filter_set_id, name, channel, filter_expression, created_at, updated_at)
+               VALUES (?, ?, ?, ?, ?, ?)""",
+            (filter_set_id, name, channel, filter_expression, now, now),
+        )
+        self._conn.commit()
+        return filter_set_id
+
+    def load_filter_set(self, filter_set_id: str) -> dict[str, Any] | None:
+        """Load a filter set by ID."""
+        self._init_filter_tables()
+        row = self._conn.execute(
+            "SELECT * FROM filter_sets WHERE filter_set_id = ?",
+            (filter_set_id,),
+        ).fetchone()
+        if row is None:
+            return None
+        return dict(row)
+
+    def list_filter_sets(self, channel: str | None = None) -> list[dict[str, Any]]:
+        """List filter sets, optionally filtered by channel."""
+        self._init_filter_tables()
+        if channel is not None:
+            rows = self._conn.execute(
+                "SELECT * FROM filter_sets WHERE channel = ? ORDER BY created_at DESC",
+                (channel,),
+            ).fetchall()
+        else:
+            rows = self._conn.execute(
+                "SELECT * FROM filter_sets ORDER BY created_at DESC"
+            ).fetchall()
+        return [dict(r) for r in rows]
+
+    def delete_filter_set(self, filter_set_id: str) -> bool:
+        """Delete a filter set. Returns True if deleted."""
+        self._init_filter_tables()
+        cur = self._conn.execute(
+            "DELETE FROM filter_sets WHERE filter_set_id = ?",
+            (filter_set_id,),
+        )
+        self._conn.commit()
+        return cur.rowcount > 0
+
+    def save_routing_rule(
+        self,
+        name: str,
+        channel: str,
+        condition: str | None = None,
+        target_endpoint: str | None = None,
+        priority: int = 100,
+        enabled: bool = True,
+        max_forward_count: int | None = None,
+        fallback: bool = False,
+    ) -> str:
+        """Save a routing rule and return its rule_id."""
+        self._init_filter_tables()
+        rule_id = uuid4().hex
+        now = datetime.now(UTC).isoformat()
+        self._conn.execute(
+            """INSERT INTO routing_rules
+               (rule_id, name, channel, enabled, priority, condition,
+                target_endpoint, max_forward_count, fallback, created_at, updated_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (
+                rule_id, name, channel,
+                1 if enabled else 0,
+                priority, condition, target_endpoint,
+                max_forward_count, 1 if fallback else 0,
+                now, now,
+            ),
+        )
+        self._conn.commit()
+        return rule_id
+
+    def list_routing_rules(
+        self, channel: str | None = None
+    ) -> list[dict[str, Any]]:
+        """List routing rules, optionally filtered by channel."""
+        self._init_filter_tables()
+        if channel is not None:
+            rows = self._conn.execute(
+                "SELECT * FROM routing_rules WHERE channel = ? ORDER BY priority ASC",
+                (channel,),
+            ).fetchall()
+        else:
+            rows = self._conn.execute(
+                "SELECT * FROM routing_rules ORDER BY priority ASC"
+            ).fetchall()
+        result = []
+        for r in rows:
+            d = dict(r)
+            d["enabled"] = bool(d["enabled"])
+            d["fallback"] = bool(d["fallback"])
+            result.append(d)
+        return result
+
+    def update_routing_rule(
+        self, rule_id: str, updates: dict[str, Any]
+    ) -> bool:
+        """Update a routing rule's fields. Returns True if updated."""
+        self._init_filter_tables()
+        if not updates:
+            return False
+        # Map boolean fields to integers for SQLite
+        field_map: dict[str, Any] = {}
+        for k, v in updates.items():
+            if k in ("enabled", "fallback"):
+                field_map[k] = 1 if v else 0
+            else:
+                field_map[k] = v
+        field_map["updated_at"] = datetime.now(UTC).isoformat()
+
+        set_clause = ", ".join(f"{k} = ?" for k in field_map)
+        values = list(field_map.values()) + [rule_id]
+        cur = self._conn.execute(
+            f"UPDATE routing_rules SET {set_clause} WHERE rule_id = ?",
+            values,
+        )
+        self._conn.commit()
+        return cur.rowcount > 0
+
+    def delete_routing_rule(self, rule_id: str) -> bool:
+        """Delete a routing rule. Returns True if deleted."""
+        self._init_filter_tables()
+        cur = self._conn.execute(
+            "DELETE FROM routing_rules WHERE rule_id = ?",
+            (rule_id,),
+        )
+        self._conn.commit()
+        return cur.rowcount > 0
+
+    def reorder_routing_rules(self, ordered_ids: list[str]) -> bool:
+        """Reorder routing rules by priority based on ordered_ids."""
+        self._init_filter_tables()
+        now = datetime.now(UTC).isoformat()
+        updated = 0
+        for i, rid in enumerate(ordered_ids):
+            cur = self._conn.execute(
+                "UPDATE routing_rules SET priority = ?, updated_at = ? WHERE rule_id = ?",
+                (i, now, rid),
+            )
+            updated += cur.rowcount
+        self._conn.commit()
+        return updated > 0
+
+    def log_filter_execution(
+        self,
+        filter_set_id: str,
+        request_id: str,
+        matched: bool,
+        matched_criteria: str | None = None,
+    ) -> str:
+        """Log a filter execution result. Returns history_id."""
+        self._init_filter_tables()
+        history_id = uuid4().hex
+        now = datetime.now(UTC).isoformat()
+        self._conn.execute(
+            """INSERT INTO filter_history
+               (history_id, filter_set_id, request_id, matched, matched_criteria, executed_at)
+               VALUES (?, ?, ?, ?, ?, ?)""",
+            (history_id, filter_set_id, request_id, 1 if matched else 0, matched_criteria, now),
+        )
+        self._conn.commit()
+        return history_id
+
+    def query_filter_history(
+        self,
+        filter_set_id: str | None = None,
+        limit: int = 20,
+        offset: int = 0,
+    ) -> list[dict[str, Any]]:
+        """Query filter execution history."""
+        self._init_filter_tables()
+        if filter_set_id is not None:
+            rows = self._conn.execute(
+                "SELECT * FROM filter_history WHERE filter_set_id = ? ORDER BY executed_at DESC LIMIT ? OFFSET ?",
+                (filter_set_id, limit, offset),
+            ).fetchall()
+        else:
+            rows = self._conn.execute(
+                "SELECT * FROM filter_history ORDER BY executed_at DESC LIMIT ? OFFSET ?",
+                (limit, offset),
+            ).fetchall()
+        result = []
+        for r in rows:
+            d = dict(r)
+            d["matched"] = bool(d["matched"])
+            result.append(d)
+        return result
 
     def store_validation_result(
         self,
