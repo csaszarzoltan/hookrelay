@@ -5,6 +5,30 @@ All notable changes to **hookrelay** are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.0] — 2026-07-29
+
+### Features
+
+- **JSON Schema Validation Engine** — validate webhook payloads against JSON Schema definitions with auto-validation on ingress
+- **Dashboard Integration** — real-time validation status display in the dashboard UI with pass/fail indicators
+- **Schema CRUD REST API** — create, read, update, delete schema definitions via HTTP endpoints
+- **CLI Schema Commands** — `hookrelay schema list|add|remove|validate` for terminal-based schema management
+- **Auto-Validation on Webhooks** — incoming webhooks automatically validated against enabled schema definitions per channel
+- **Validation Results API** — query validation history and results via REST endpoints
+- **Server Foundation** — FastAPI server with `/health` endpoint, WebSocket connections, and static file serving
+
+### Dependencies
+
+- `jsonschema[format-nongpl]>=4.26` — JSON Schema validation (Draft 2020-12, Draft 7, Draft 6, Draft 4)
+- `fastapi>=0.110` — REST API and server framework
+- `uvicorn>=0.29` — ASGI server
+- `jinja2>=3.1` — template engine for dashboard pages
+
+### Tests
+
+- 86 new tests across 8 test modules (schemas, validation, schema API, CLI schema, auto-validation, server, dashboard integration, validation results)
+- 330 total tests (up from 244 in v0.2.0)
+
 ## [0.2.0] — 2026-07-29
 
 ### Features
