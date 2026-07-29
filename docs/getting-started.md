@@ -2,15 +2,22 @@
 
 ## Overview
 
-hookrelay consists of two components:
+hookrelay consists of three components:
 
 1. **Relay Server** — a FastAPI + WebSocket server that receives webhooks and tunnels them to connected clients
-2. **CLI Client** — the `hookrelay` command that connects to the relay server and forwards webhooks to your local development server
+2. **Web Dashboard** — a browser-based UI for inspecting payloads, browsing history, replaying requests, and live monitoring (served by the relay server)
+3. **CLI Client** — the `hookrelay` command that connects to the relay server and forwards webhooks to your local development server
 
 ## Architecture
 
 ```
-External Webhook → Relay Server → WebSocket Tunnel → hookrelay CLI → Localhost App
+External Webhook → Relay Server ──→ WebSocket Tunnel → hookrelay CLI → Localhost App
+                                │
+                                └──→ Web Dashboard (http://localhost:8000/dashboard/)
+                                        ├── Live Feed (WebSocket)
+                                        ├── History Browser (filter/search)
+                                        ├── Payload Inspector
+                                        └── Request Replay
 ```
 
 ## Prerequisites
@@ -26,17 +33,40 @@ pip install hookrelay
 
 ## Starting the Relay Server
 
-The relay server is included as a separate component:
+The relay server includes both the WebSocket relay and the Web Dashboard:
 
 ```bash
-uvicorn hookrelay_server.main:app --host 0.0.0.0 --port 8000
+hookrelay serve
 ```
 
-Or with the provided launcher script:
+Or with custom host and port:
 
 ```bash
-# Run the relay server in the background
-hookrelay-server &
+hookrelay serve --host 127.0.0.1 --port 9000
+```
+
+The dashboard is available at **http://localhost:8000/dashboard/** (or your custom port).
+
+### Options
+
+| Option   | Default   | Description                     |
+|----------|-----------|---------------------------------|
+| `--host` | `0.0.0.0` | Host to bind the server to      |
+| `--port` | `8000`    | Port to bind the server to      |
+| `--reload` | —       | Enable auto-reload (development) |
+
+### Health Check
+
+Verify the server is running:
+
+```bash
+curl http://localhost:8000/health
+```
+
+Returns:
+
+```json
+{"status": "ok", "version": "0.2.0", "uptime": 123.45, "total_requests": 42}
 ```
 
 ## Forwarding Webhooks
@@ -50,6 +80,20 @@ hookrelay forward mychannel http://localhost:8080/webhook --server https://relay
 ```
 
 ## Inspection & Debugging
+
+### Dashboard (Browser)
+
+Open **http://localhost:8000/dashboard/** in your browser:
+
+- **Live Feed** — real-time webhook events via WebSocket, auto-updates the table
+- **History Browser** — paginated, filterable list with search support
+- **Payload Inspector** — detailed view of headers, query params, and body
+- **Request Replay** — one-click replay from the dashboard UI
+
+![Dashboard](screenshots/dashboard.png)
+*Figure: Hookrelay Web Dashboard — Live Feed view*
+
+### CLI
 
 View incoming webhooks in real-time:
 
@@ -77,7 +121,7 @@ hookrelay replay abc123 --target http://localhost:9000/retry
 hookrelay can be configured via environment variables:
 
 - `HOOKRELAY_SERVER` — default relay server URL
-- `HOOKREAY_DB_DIR` — directory for the SQLite database
+- `HOOKRELAY_DB_DIR` — directory for the SQLite database
 
 Or via a `.env` file in the working directory:
 
