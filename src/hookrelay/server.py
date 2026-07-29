@@ -6,6 +6,8 @@ from fastapi import FastAPI, Request, WebSocket
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
+from pydantic import BaseModel
+
 from hookrelay import __version__, _storage
 from hookrelay.dashboard import create_dashboard_router
 from hookrelay.relay import RelayManager
@@ -49,9 +51,6 @@ def _register_relay_ws(app: FastAPI) -> None:
             pass
         finally:
             _relay_manager.unregister_client(channel, ws)
-
-
-from pydantic import BaseModel
 
 
 class _CreateSchemaRequest(BaseModel):
