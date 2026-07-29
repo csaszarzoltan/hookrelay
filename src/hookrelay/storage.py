@@ -184,3 +184,143 @@ class Storage:
     def close(self) -> None:
         """Close the database connection."""
         self._conn.close()
+
+    # ============================================================
+    # Schema table management
+    # ============================================================
+
+    def _init_schema_table(self) -> None:
+        """Create the schemas table if it doesn't exist."""
+        self._conn.executescript("""
+            CREATE TABLE IF NOT EXISTS schemas (
+                schema_id TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                version TEXT NOT NULL DEFAULT '1.0.0',
+                channel TEXT NOT NULL,
+                schema_definition TEXT NOT NULL,
+                draft_version TEXT NOT NULL DEFAULT '2020-12',
+                enabled INTEGER NOT NULL DEFAULT 1,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                metadata TEXT DEFAULT '{}',
+                severity_level TEXT NOT NULL DEFAULT 'error'
+            );
+            CREATE INDEX IF NOT EXISTS idx_schemas_channel ON schemas(channel);
+        """)
+        self._conn.commit()
+
+    def _init_validation_results_table(self) -> None:
+        """Create the validation_results table if it doesn't exist."""
+        self._conn.executescript("""
+            CREATE TABLE IF NOT EXISTS validation_results (
+                result_id TEXT PRIMARY KEY,
+                request_id TEXT NOT NULL,
+                schema_id TEXT NOT NULL,
+                valid INTEGER NOT NULL DEFAULT 0,
+                errors TEXT,
+                warnings TEXT,
+                infos TEXT,
+                validated_at TEXT NOT NULL,
+                severity TEXT NOT NULL DEFAULT 'error'
+            );
+            CREATE INDEX IF NOT EXISTS idx_validation_request ON validation_results(request_id);
+            CREATE INDEX IF NOT EXISTS idx_validation_schema ON validation_results(schema_id);
+            CREATE TRIGGER IF NOT EXISTS tr_validation_results_cascade_ad
+            AFTER DELETE ON webhooks
+            BEGIN
+                DELETE FROM validation_results WHERE request_id = old.request_id;
+            END;
+        """)
+        self._conn.commit()
+
+    def store_validation_result(
+        self,
+        request_id: str,
+        schema_id: str,
+        result: dict,
+    ) -> str:
+        """Store a validation result.
+
+        Args:
+            request_id: The webhook request ID.
+            schema_id: The schema ID.
+            result: Validation result dict with valid, errors, warnings, infos.
+
+        Returns:
+            The result_id.
+        """
+        import json as json_mod
+        from datetime import UTC, datetime
+        from uuid import uuid4
+
+        result_id = uuid4().hex
+        now = datetime.now(tz=UTC).isoformat()
+
+        self._init_validation_results_table()
+        self._conn.execute(
+            """INSERT INTO validation_results
+               (result_id, request_id, schema_id, valid, errors, warnings, infos, validated_at, severity)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (
+                result_id,
+                request_id,
+                schema_id,
+                1 if result.get("valid") else 0,
+                json_mod.dumps(result.get("errors", [])),
+                json_mod.dumps(result.get("warnings", [])),
+                json_mod.dumps(result.get("infos", [])),
+                now,
+                "error",
+            ),
+        )
+        self._conn.commit()
+        return result_id
+
+    def get_validation_result(self, request_id: str) -> dict | None:
+        """Get validation result for a request.
+
+        Args:
+            request_id: The webhook request ID.
+
+        Returns:
+            The validation result dict, or None if not found.
+        """
+        self._init_validation_results_table()
+        import json as json_mod
+        row = self._conn.execute(
+            "SELECT * FROM validation_results WHERE request_id = ? ORDER BY validated_at DESC LIMIT 1",
+            (request_id,),
+        ).fetchone()
+        if row is None:
+            return None
+        d = dict(row)
+        for field in ("errors", "warnings", "infos"):
+            if isinstance(d.get(field), str):
+                d[field] = json_mod.loads(d[field])
+        d["valid"] = bool(d["valid"])
+        return d
+
+    def get_validation_results_for_request(self, request_id: str) -> list[dict]:
+        """Get all validation results for a request.
+
+        Args:
+            request_id: The webhook request ID.
+
+        Returns:
+            List of validation result dicts.
+        """
+        self._init_validation_results_table()
+        import json as json_mod
+        rows = self._conn.execute(
+            "SELECT * FROM validation_results WHERE request_id = ? ORDER BY validated_at DESC",
+            (request_id,),
+        ).fetchall()
+        results = []
+        for row in rows:
+            d = dict(row)
+            for field in ("errors", "warnings", "infos"):
+                if isinstance(d.get(field), str):
+                    d[field] = json_mod.loads(d[field])
+            d["valid"] = bool(d["valid"])
+            results.append(d)
+        return results

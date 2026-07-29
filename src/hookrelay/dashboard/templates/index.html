@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Hookrelay Dashboard</title>
+    <link rel="stylesheet" href="/dashboard/static/style.css">
+</head>
+<body>
+    <nav class="dashboard-nav">
+        <div class="nav-brand">Hookrelay</div>
+        <div class="nav-links">
+            <a href="/dashboard/" class="active">Live Feed</a>
+            <a href="/dashboard/history">History</a>
+        </div>
+    </nav>
+
+    <main class="dashboard-main">
+        <header class="page-header">
+            <h1>Live Feed</h1>
+            <span class="badge">{{ total_count }} total requests</span>
+        </header>
+
+        <section class="live-feed" id="live-feed">
+            {% if recent_requests %}
+            <table class="request-table">
+                <thead>
+                    <tr>
+                        <th>Time</th>
+                        <th>Method</th>
+                        <th>Channel</th>
+                        <th>Path</th>
+                        <th>Source</th>
+                        <th>ID</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for req in recent_requests %}
+                    <tr>
+                        <td class="time">{{ req.received_at[-12:] if req.received_at else '' }}</td>
+                        <td><span class="method method-{{ req.method|lower }}">{{ req.method }}</span></td>
+                        <td>{{ req.channel }}</td>
+                        <td>{{ req.path }}</td>
+                        <td>{{ req.source_ip }}</td>
+                        <td><a href="/dashboard/inspect/{{ req.request_id }}" class="req-link">{{ req.request_id[:12] }}</a></td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+            {% else %}
+            <div class="empty-state">
+                <p>No webhooks received yet.</p>
+                <p>Configure your webhook sender to POST to <code>/webhook/&lt;channel&gt;</code></p>
+            </div>
+            {% endif %}
+        </section>
+    </main>
+
+    <script src="/dashboard/static/dashboard.js"></script>
+</body>
+</html>

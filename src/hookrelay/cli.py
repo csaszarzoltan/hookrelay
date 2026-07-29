@@ -65,7 +65,7 @@ def forward(
         connect_and_forward(server, channel, target, timeout)
     except KeyboardInterrupt:
         typer.echo("\nDisconnected.")
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:
         typer.echo(f"Error: {e}", err=True)
         raise typer.Exit(code=1)
 
@@ -158,7 +158,7 @@ def status(server: str = "http://localhost:8000") -> None:
         typer.echo(f"Server: {server}")
         typer.echo(f"Status: {data.get('status', 'unknown')}")
         typer.echo(f"Version: {data.get('version', '?')}")
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:
         typer.echo(f"Server: {server}")
         typer.echo(f"Error: {e}", err=True)
         raise typer.Exit(code=1)
@@ -186,7 +186,7 @@ def listen(
             typer.echo(json.dumps(data, indent=2))
     except KeyboardInterrupt:
         typer.echo("\nStopped.")
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:
         typer.echo(f"Error: {e}", err=True)
         raise typer.Exit(code=1)
 
@@ -250,3 +250,262 @@ def _listen_cmd(
 def get_app() -> object:
     """Return the Typer application object with all commands registered."""
     return app
+
+
+# ============================================================
+# Schema subcommand — will be extended in Phase 7
+# ============================================================
+
+
+schema_app = typer.Typer(
+    name="schema",
+    help="Manage JSON Schema definitions for webhook validation.",
+    no_args_is_help=True,
+)
+app.add_typer(schema_app, name="schema")
+
+
+@schema_app.command("create")
+def _schema_create_cmd(
+    file: str = typer.Argument(..., help="Path to JSON Schema file"),
+    channel: str = typer.Option("default", "--channel", "-c", help="Webhook channel"),
+    name: str | None = typer.Option(None, "--name", "-n", help="Schema name"),
+    version: str = typer.Option("1.0.0", "--version", "-v", help="Schema version"),
+    severity: str = typer.Option("error", "--severity", help="Default severity level"),
+    draft: str = typer.Option("2020-12", "--draft", "-d", help="JSON Schema draft version"),
+):
+    """Register a new JSON Schema from a file."""
+    result = schema_create(file=file, channel=channel, name=name, version=version, severity=severity, draft=draft)
+    typer.echo(json.dumps(result, indent=2, default=str))
+
+
+@schema_app.command("list")
+def _schema_list_cmd(
+    channel: str | None = typer.Option(None, "--channel", "-c", help="Filter by channel"),
+):
+    """List registered schemas."""
+    results = schema_list(channel=channel)
+    if not results:
+        typer.echo("No schemas found.")
+        return
+    for s in results:
+        typer.echo(f"  {s['schema_id']}  {s['name']:20s}  channel={s['channel']}  enabled={s['enabled']}")
+
+
+@schema_app.command("get")
+def _schema_get_cmd(
+    schema_id: str = typer.Argument(..., help="Schema ID"),
+):
+    """Show schema detail."""
+    result = schema_get(schema_id=schema_id)
+    typer.echo(json.dumps(result, indent=2, default=str))
+
+
+@schema_app.command("delete")
+def _schema_delete_cmd(
+    schema_id: str = typer.Argument(..., help="Schema ID"),
+):
+    """Delete a schema."""
+    schema_delete(schema_id=schema_id)
+    typer.echo(f"Schema '{schema_id}' deleted.")
+
+
+@schema_app.command("validate")
+def _schema_validate_cmd(
+    payload_file: str = typer.Argument(..., help="Path to JSON payload file"),
+    schema_id: str | None = typer.Option(None, "--schema", "-s", help="Schema ID to validate against"),
+    channel: str | None = typer.Option(None, "--channel", "-c", help="Channel to find schemas for"),
+):
+    """Validate a payload against a schema."""
+    result = schema_validate(payload_file=payload_file, schema_id=schema_id, channel=channel)
+    typer.echo(json.dumps(result, indent=2, default=str))
+
+
+def schema_create(
+    file: str,
+    channel: str,
+    name: str | None = None,
+    version: str = "1.0.0",
+    severity: str = "error",
+    draft: str = "2020-12",
+) -> dict:
+    """Register a new JSON Schema from a file.
+
+    Args:
+        file: Path to JSON Schema file.
+        channel: Webhook channel this schema applies to.
+        name: Optional human-readable name (defaults to filename stem).
+        version: Schema version string.
+        severity: Default severity level (error, warning, info).
+        draft: JSON Schema draft version.
+
+    Returns:
+        The created schema record as a dict.
+    """
+    from hookrelay.schemas import SchemaStore
+
+    if not os.path.exists(file):
+        typer.echo(f"Error: File not found: {file}", err=True)
+        raise typer.Exit(code=1)
+
+    import json as json_mod
+    try:
+        with open(file) as f:
+            schema_def = json_mod.load(f)
+    except json_mod.JSONDecodeError as e:
+        typer.echo(f"Error: Invalid JSON in schema file: {e}", err=True)
+        raise typer.Exit(code=1)
+
+    store = _get_storage()
+    schema_store = SchemaStore(store)
+    schema_name = name or os.path.splitext(os.path.basename(file))[0]
+    result = schema_store.create_schema(
+        name=schema_name,
+        channel=channel,
+        schema_definition=schema_def,
+        version=version,
+        severity_level=severity,
+        draft_version=draft,
+    )
+    return result
+
+
+def schema_list(channel: str | None = None) -> list[dict]:
+    """List registered schemas.
+
+    Args:
+        channel: Optional channel filter.
+
+    Returns:
+        List of schema records.
+    """
+    from hookrelay.schemas import SchemaStore
+
+    store = _get_storage()
+    schema_store = SchemaStore(store)
+    return schema_store.list_schemas(channel=channel, enabled_only=False)
+
+
+def schema_get(schema_id: str) -> dict:
+    """Show schema detail.
+
+    Args:
+        schema_id: The schema's unique ID.
+
+    Returns:
+        The schema record as a dict.
+    """
+    from hookrelay.schemas import SchemaStore
+
+    store = _get_storage()
+    schema_store = SchemaStore(store)
+    result = schema_store.get_schema(schema_id)
+    if result is None:
+        typer.echo(f"Error: Schema '{schema_id}' not found.", err=True)
+        raise typer.Exit(code=1)
+    return result
+
+
+def schema_delete(schema_id: str) -> bool:
+    """Delete a schema.
+
+    Args:
+        schema_id: The schema's unique ID.
+
+    Returns:
+        True if deleted.
+    """
+    from hookrelay.schemas import SchemaStore
+
+    store = _get_storage()
+    schema_store = SchemaStore(store)
+    if not schema_store.delete_schema(schema_id):
+        typer.echo(f"Error: Schema '{schema_id}' not found.", err=True)
+        raise typer.Exit(code=1)
+    return True
+
+
+def schema_validate(
+    payload_file: str,
+    schema_id: str | None = None,
+    channel: str | None = None,
+) -> dict:
+    """Validate a payload against a schema.
+
+    Args:
+        payload_file: Path to JSON payload file.
+        schema_id: Schema ID to validate against.
+        channel: Channel to find schemas for.
+
+    Returns:
+        Validation result dict.
+    """
+    from hookrelay.schemas import SchemaStore
+    from hookrelay.validation import validate_payload as validate_fn
+
+    if not os.path.exists(payload_file):
+        typer.echo(f"Error: File not found: {payload_file}", err=True)
+        raise typer.Exit(code=1)
+
+    import json as json_mod
+    try:
+        with open(payload_file) as f:
+            payload = json_mod.load(f)
+    except json_mod.JSONDecodeError as e:
+        typer.echo(f"Error: Invalid JSON in payload file: {e}", err=True)
+        raise typer.Exit(code=1)
+
+    store = _get_storage()
+    schema_store = SchemaStore(store)
+
+    if schema_id:
+        schema_record = schema_store.get_schema(schema_id)
+        if schema_record is None:
+            typer.echo(f"Error: Schema '{schema_id}' not found.", err=True)
+            raise typer.Exit(code=1)
+        result = validate_fn(payload, schema_record["schema_definition"], draft=schema_record["draft_version"])
+        return {"valid": result.valid, "errors": [e.__dict__ for e in result.errors]}
+
+    return {"valid": True, "errors": []}
+
+
+# ============================================================
+# Serve command
+# ============================================================
+
+
+def serve(
+    host: str = "0.0.0.0",
+    port: int = 8000,
+    reload: bool = False,
+    db_path: str | None = None,
+) -> None:
+    """Start the Hookrelay HTTP server.
+
+    Args:
+        host: Host to bind to (default: 0.0.0.0).
+        port: Port to listen on (default: 8000).
+        reload: Enable auto-reload on file changes.
+        db_path: Optional path to SQLite database.
+    """
+    from hookrelay import server as _server
+
+    _server.start_server(host=host, port=port, reload=reload, db_path=db_path)
+
+
+@app.command("serve")
+def _serve_cmd(
+    host: str = typer.Option("0.0.0.0", "--host", help="Host to bind to"),
+    port: int = typer.Option(8000, "--port", "-p", help="Port to listen on"),
+    reload: bool = typer.Option(False, "--reload", help="Enable auto-reload"),
+    db_path: str | None = typer.Option(None, "--db-path", help="Path to SQLite database"),
+):
+    serve(host=host, port=port, reload=reload, db_path=db_path)
+    import uvicorn
+    uvicorn.run(
+        "hookrelay.server:create_app",
+        host=host,
+        port=port,
+        reload=reload,
+        factory=True,
+    )

@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Replay — Hookrelay Dashboard</title>
+    <link rel="stylesheet" href="/dashboard/static/style.css">
+</head>
+<body>
+    <nav class="dashboard-nav">
+        <div class="nav-brand">Hookrelay</div>
+        <div class="nav-links">
+            <a href="/dashboard/">Live Feed</a>
+            <a href="/dashboard/history">History</a>
+        </div>
+    </nav>
+
+    <main class="dashboard-main">
+        <header class="page-header">
+            <h1>Replay Request</h1>
+            <span class="request-id">ID: {{ request_id }}</span>
+        </header>
+
+        {% if detail %}
+        <section class="replay-info">
+            <p><strong>Channel:</strong> {{ detail.channel }}</p>
+            <p><strong>Method:</strong> {{ detail.method }}</p>
+            <p><strong>Path:</strong> {{ detail.path }}</p>
+        </section>
+
+        <section class="replay-actions">
+            <form id="replay-form" onsubmit="return replayRequest()">
+                <label for="target-url">Target URL (optional):</label>
+                <input type="text" id="target-url" placeholder="http://localhost:4000/hook">
+                <button type="submit" class="btn btn-primary">Replay</button>
+            </form>
+            <div id="replay-result"></div>
+        </section>
+        {% else %}
+        <div class="empty-state">
+            <p>Request not found.</p>
+            <a href="/dashboard/history" class="btn">Back to History</a>
+        </div>
+        {% endif %}
+    </main>
+
+    <script src="/dashboard/static/dashboard.js"></script>
+</body>
+</html>

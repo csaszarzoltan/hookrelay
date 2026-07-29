@@ -93,7 +93,7 @@ def validate_target_url(
 
     try:
         parsed = urlparse(url)
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:
         return False, f"Invalid URL: {e}"
 
     if not parsed.scheme:

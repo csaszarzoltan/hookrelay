@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Inspect — Hookrelay Dashboard</title>
+    <link rel="stylesheet" href="/dashboard/static/style.css">
+</head>
+<body>
+    <nav class="dashboard-nav">
+        <div class="nav-brand">Hookrelay</div>
+        <div class="nav-links">
+            <a href="/dashboard/">Live Feed</a>
+            <a href="/dashboard/history">History</a>
+        </div>
+    </nav>
+
+    <main class="dashboard-main">
+        {% if detail %}
+        <header class="page-header">
+            <h1>Request Details <span class="validation-badge info">Validation status available</span></h1>
+            <span class="request-id">ID: {{ detail.request_id }}</span>
+        </header>
+
+        {% if validation_result %}
+        <section class="validation-section">
+            <h2>Validation Status
+                {% if validation_result.valid %}
+                <span class="validation-badge valid">✅ Valid</span>
+                {% else %}
+                <span class="validation-badge invalid">❌ Invalid</span>
+                {% endif %}
+            </h2>
+
+            {% if validation_result.errors %}
+            <div class="validation-details">
+                <h3>Errors ({{ validation_result.errors|length }})</h3>
+                {% for error in validation_result.errors %}
+                <div class="validation-error">
+                    <div class="error-header" onclick="this.parentElement.classList.toggle('expanded')">
+                        <span class="severity severity-error">error</span>
+                        <span class="error-path">{{ error.path }}</span>
+                        <span class="toggle-icon">▶</span>
+                    </div>
+                    <div class="error-body">
+                        <p><strong>Message:</strong> {{ error.message }}</p>
+                        {% if error.schema_path %}<p><strong>Schema Path:</strong> {{ error.schema_path }}</p>{% endif %}
+                        {% if error.validator %}<p><strong>Validator:</strong> {{ error.validator }} = {{ error.validator_value }}</p>{% endif %}
+                    </div>
+                </div>
+                {% endfor %}
+            </div>
+            {% endif %}
+
+            {% if validation_result.warnings %}
+            <div class="validation-details">
+                <h3>Warnings ({{ validation_result.warnings|length }})</h3>
+                {% for warn in validation_result.warnings %}
+                <div class="validation-error">
+                    <div class="error-header" onclick="this.parentElement.classList.toggle('expanded')">
+                        <span class="severity severity-warning">warning</span>
+                        <span class="error-path">{{ warn.path }}</span>
+                        <span class="toggle-icon">▶</span>
+                    </div>
+                    <div class="error-body">
+                        <p><strong>Message:</strong> {{ warn.message }}</p>
+                    </div>
+                </div>
+                {% endfor %}
+            </div>
+            {% endif %}
+
+            {% if validation_result.infos %}
+            <div class="validation-details">
+                <h3>Info ({{ validation_result.infos|length }})</h3>
+                {% for info in validation_result.infos %}
+                <div class="validation-error">
+                    <div class="error-header" onclick="this.parentElement.classList.toggle('expanded')">
+                        <span class="severity severity-info">info</span>
+                        <span class="error-path">{{ info.path }}</span>
+                        <span class="toggle-icon">▶</span>
+                    </div>
+                    <div class="error-body">
+                        <p><strong>Message:</strong> {{ info.message }}</p>
+                    </div>
+                </div>
+                {% endfor %}
+            </div>
+            {% endif %}
+        </section>
+        {% endif %}
+
+        <section class="request-details">
+            <h2>Request Info</h2>
+            <table class="detail-table">
+                <tr><th>Channel</th><td>{{ detail.channel }}</td></tr>
+                <tr><th>Method</th><td>{{ detail.method }}</td></tr>
+                <tr><th>Path</th><td>{{ detail.path }}</td></tr>
+                <tr><th>Source IP</th><td>{{ detail.source_ip }}</td></tr>
+                <tr><th>Received At</th><td>{{ detail.received_at }}</td></tr>
+                <tr><th>Replayed</th><td>{{ detail.replayed }}</td></tr>
+            </table>
+        </section>
+
+        {% if detail.headers %}
+        <section class="request-headers">
+            <h2>Headers</h2>
+            <table class="detail-table">
+                {% for key, value in detail.headers.items() %}
+                <tr><th>{{ key }}</th><td>{{ value }}</td></tr>
+                {% endfor %}
+            </table>
+        </section>
+        {% endif %}
+
+        {% if detail.body %}
+        <section class="request-body">
+            <h2>Body</h2>
+            <pre class="body-content">{{ detail.body.decode('utf-8', errors='replace') }}</pre>
+        </section>
+        {% endif %}
+
+        <section class="request-actions">
+            <a href="/dashboard/replay/{{ detail.request_id }}" class="btn">Replay Request</a>
+        </section>
+
+        {% else %}
+        <div class="empty-state">
+            <h1>Request Not Found</h1>
+            <p>The request with ID "{{ request_id }}" could not be found.</p>
+            <a href="/dashboard/history" class="btn">Back to History</a>
+        </div>
+        {% endif %}
+    </main>
+
+    <script src="/dashboard/static/dashboard.js"></script>
+</body>
+</html>

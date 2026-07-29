@@ -33,7 +33,7 @@ class WebSocketClient:
         if self._ws is not None:
             try:
                 self._ws.close()
-            except Exception:  # noqa: BLE001,S110
+            except Exception:
                 # WebSocket not open or already closed - ignore
                 pass
             self._ws = None
@@ -81,7 +81,7 @@ class WebSocketClient:
         try:
             self._ws.ping()
             return True
-        except Exception:  # noqa: BLE001
+        except Exception:
             return False
 
 
@@ -124,5 +124,5 @@ def connect_and_forward(
     finally:
         try:
             ws_conn.close()
-        except Exception:  # noqa: BLE001,S110
+        except Exception:
             pass

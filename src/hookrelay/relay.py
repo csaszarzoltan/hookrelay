@@ -46,7 +46,7 @@ class RelayManager:
                 ws.send(payload)
                 received_count += 1
                 still_connected.append(ws)
-            except Exception:  # noqa: BLE001,S110
+            except Exception:
                 # Client disconnected, skip it
                 pass
 
