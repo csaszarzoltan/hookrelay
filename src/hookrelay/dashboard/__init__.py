@@ -10,13 +10,15 @@ from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.templating import Jinja2Templates
 
 from hookrelay import _storage
+from hookrelay.auth import (
+    SESSION_COOKIE,
+    configured_token,
+    session_matches,
+    token_matches,
+)
 from hookrelay.dashboard.connection_manager import ConnectionManager
 from hookrelay.relay import RelayManager
-from hookrelay.replay import (
-    NoConnectedClientError,
-    RequestNotFoundError,
-    replay_request,
-)
+from hookrelay.replay import RequestNotFoundError, replay_request
 
 # Global connection manager for live monitoring
 _live_manager = ConnectionManager()
@@ -26,29 +28,7 @@ _relay_manager = RelayManager()
 _TEMPLATES_DIR = Path(__file__).resolve().parent / "templates"
 
 templates = Jinja2Templates(directory=str(_TEMPLATES_DIR))
-
-_SENSITIVE_HEADERS = frozenset({
-    "authorization", "proxy-authorization", "cookie", "set-cookie",
-    "x-api-key", "x-auth-token", "api-key",
-})
-
-
-def get_live_manager() -> ConnectionManager:
-    """Return the process-wide dashboard connection manager."""
-    return _live_manager
-
-
-def get_relay_manager() -> RelayManager:
-    """Return the process-wide relay manager shared by server and dashboard."""
-    return _relay_manager
-
-
-def redact_headers(headers: dict[str, Any]) -> dict[str, Any]:
-    """Mask common secret-bearing headers before rendering them in HTML."""
-    return {
-        name: ("••••••••" if name.lower() in _SENSITIVE_HEADERS else value)
-        for name, value in headers.items()
-    }
+templates.env.globals["auth_enabled"] = lambda: configured_token() is not None
 
 
 def create_dashboard_router() -> APIRouter:
@@ -80,39 +60,14 @@ def create_dashboard_router() -> APIRouter:
         limit: int = Query(20),
         offset: int = Query(0),
         validation_status: str | None = Query(None),
-        path: str | None = Query(None),
-        q: str | None = Query(None),
-        view: str | None = Query(None),
     ):
         """History browser page with filters and pagination."""
         store = _storage.get()
-        selected_view = None
-        saved_views = store.list_request_views() if store else []
-        if store and view:
-            selected_view = store.get_request_view(view)
-            if selected_view:
-                filters = selected_view["filters"]
-                q = q or filters.get("q")
-                channel = channel or filters.get("channel")
-                method = method or filters.get("method")
-                path = path or filters.get("path")
-                validation_status = validation_status or filters.get("validation_status")
-                if limit == 20 and filters.get("limit"):
-                    limit = int(filters["limit"])
         if store:
-            if q:
-                matched = store.search_requests(query=q, channel=channel, limit=10000)
-                if method:
-                    matched = [item for item in matched if item.get("method") == method]
-                if path:
-                    matched = [item for item in matched if path in item.get("path", "")]
-                total = len(matched)
-                requests = matched[offset : offset + limit]
-            else:
-                requests = store.list_requests(
-                    channel=channel, limit=limit, offset=offset, method=method, path=path
-                )
-                total = store.count_requests(channel=channel)
+            requests = store.list_requests(
+                channel=channel, limit=limit, offset=offset, method=method
+            )
+            total = store.count_requests(channel=channel)
             for req in requests:
                 try:
                     vr = store.get_validation_results_for_request(
@@ -124,11 +79,6 @@ def create_dashboard_router() -> APIRouter:
                         )
                 except Exception:
                     pass
-            if validation_status in {"valid", "invalid"}:
-                requests = [
-                    item for item in requests
-                    if item.get("validation_status") == validation_status
-                ]
         else:
             requests = []
             total = 0
@@ -144,12 +94,6 @@ def create_dashboard_router() -> APIRouter:
                 "limit": limit,
                 "offset": offset,
                 "validation_status": validation_status,
-                "path": path,
-                "q": q,
-                "saved_views": saved_views,
-                "selected_view": selected_view,
-                "selected_view_id": view,
-                "has_next": offset + len(requests) < total,
             },
         )
 
@@ -158,9 +102,6 @@ def create_dashboard_router() -> APIRouter:
         """Payload inspector page with validation status."""
         store = _storage.get()
         detail = store.get_request(request_id) if store else None
-        if detail:
-            detail = dict(detail)
-            detail["headers"] = redact_headers(detail.get("headers", {}))
         validation_result = None
         delivery_attempts = store.list_delivery_attempts(request_id) if store and detail else []
         if store and detail:
@@ -200,33 +141,18 @@ def create_dashboard_router() -> APIRouter:
                 status_code=404,
                 content={"error": f"Request {request_id} not found"},
             )
-        target = body.get("target") if body else None
-        detail = store.get_request(request_id)
-        if detail is None:
-            return JSONResponse(
-                status_code=404,
-                content={"error": f"Request {request_id} not found", "code": "not_found"},
-            )
-        channel = detail.get("channel", "default")
+        target = None
+        if body:
+            target = body.get("target")
         try:
-            result = replay_request(
+            replay_request(
                 request_id=request_id,
-                channel=channel,
+                channel="default",
                 storage=store,
                 relay_manager=_relay_manager,
                 target_url=target,
             )
-            return {"status": "ok", "request_id": request_id, "channel": channel, **result}
-        except NoConnectedClientError as exc:
-            return JSONResponse(
-                status_code=409,
-                content={
-                    "error": str(exc),
-                    "code": "no_connected_client",
-                    "request_id": request_id,
-                    "channel": channel,
-                },
-            )
+            return {"status": "ok", "request_id": request_id}
         except RequestNotFoundError:
             return JSONResponse(
                 status_code=404,
@@ -234,73 +160,26 @@ def create_dashboard_router() -> APIRouter:
             )
 
 
-
-
-
-    @router.get("/api/request-views")
-    async def list_request_views():
+    @router.get("/dashboard/settings", response_class=HTMLResponse)
+    async def dashboard_settings(request: Request):
         store = _storage.get()
-        return store.list_request_views() if store else []
-
-    @router.post("/api/request-views", status_code=201)
-    async def create_request_view(body: dict[str, Any]):
-        store = _storage.get()
-        if store is None:
-            return JSONResponse(status_code=503, content={"error": "Storage unavailable"})
-        try:
-            view_id = store.save_request_view(
-                str(body.get("name", "")), dict(body.get("filters", {}))
-            )
-        except (TypeError, ValueError) as exc:
-            return JSONResponse(status_code=422, content={"error": str(exc)})
-        return {"view_id": view_id, "name": body.get("name")}
-
-    @router.delete("/api/request-views/{view_id}", status_code=204)
-    async def delete_request_view(view_id: str):
-        store = _storage.get()
-        if store is None or not store.delete_request_view(view_id):
-            return JSONResponse(status_code=404, content={"error": "Saved view not found"})
-        return HTMLResponse(status_code=204)
-
-    @router.delete("/api/requests/{request_id}", status_code=204)
-    async def delete_request(request_id: str, confirm: bool = Query(False)):
-        """Delete one stored request after an explicit confirmation flag."""
-        if not confirm:
-            return JSONResponse(
-                status_code=400,
-                content={"error": "Set confirm=true to delete this request."},
-            )
-        store = _storage.get()
-        if store is None or not store.delete_request(request_id):
-            return JSONResponse(
-                status_code=404,
-                content={"error": f"Request {request_id} not found"},
-            )
-        return HTMLResponse(status_code=204)
-
-    @router.get("/api/requests/{request_id}/delivery-attempts")
-    async def delivery_attempts(request_id: str):
-        """Return delivery history for one stored request."""
-        store = _storage.get()
-        if store is None or store.get_request(request_id) is None:
-            return JSONResponse(
-                status_code=404,
-                content={"error": f"Request {request_id} not found"},
-            )
-        return store.list_delivery_attempts(request_id)
-
-    @router.get("/api/dashboard/status")
-    async def dashboard_status():
-        """Return lightweight monitoring and relay readiness state."""
-        return {
-            "status": "ok",
-            "dashboard_connections": _live_manager.active_connections,
-            "relay_channels": _relay_manager.channel_counts(),
-        }
+        retention_days = store.get_setting("retention_days", 30) if store else 30
+        return templates.TemplateResponse(
+            request,
+            "settings.html",
+            {"retention_days": retention_days},
+        )
 
     @router.websocket("/dashboard/ws/live")
     async def live_websocket(ws: WebSocket):
         """Live monitoring WebSocket for real-time dashboard updates."""
+        auth_token = configured_token()
+        if auth_token and not (
+            token_matches(ws.query_params.get("token"), auth_token)
+            or session_matches(ws.cookies.get(SESSION_COOKIE), auth_token)
+        ):
+            await ws.close(code=1008, reason="Authentication required")
+            return
         await _live_manager.connect(ws)
         try:
             while True:

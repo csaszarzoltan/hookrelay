@@ -233,34 +233,15 @@ Ensure you're running v0.2.0+ and the server was started with `hookrelay serve`.
 - Verify the correct channel is being used
 
 
-### Delivery Timeline (v0.6.0+)
+### Response diagnostics and retention (v0.8.0+)
 
-The request inspector shows each forwarding result reported by a connected CLI client:
+After a forwarding client sends a webhook to the local target, it reports the outcome to Hookrelay. The request inspector can display:
 
-- **Delivered** for local responses below HTTP 400
-- **Target error** for HTTP 4xx or 5xx responses
-- **Transport error** when the target cannot be reached or the request fails before a response
+- Delivery, target-error, or transport-error status
+- Local HTTP response status
+- Forwarding duration
+- Redacted response headers
+- Up to 16 KiB of response-body text
+- A visible truncation marker when the response exceeded the limit
 
-Each attempt includes the target URL, response status, duration, timestamp, and error details when available. Programmatic clients can query `GET /api/requests/{request_id}/delivery-attempts`.
-
-### Delete a Stored Request
-
-The inspector includes **Delete stored request**. The action requires confirmation and removes the request together with its validation and delivery-attempt records. API clients must call `DELETE /api/requests/{request_id}?confirm=true`.
-
-
-### Full-text search and saved views (v0.7.0+)
-
-The History page now searches indexed request payloads, headers, paths, channels, and methods. Enter a value in **Search payload, path, and headers**, then combine it with channel, method, path, validation, and page-size filters.
-
-Frequently reused filter combinations can be saved as named request views:
-
-1. Configure the current History filters.
-2. Choose **Save current filters**.
-3. Enter a unique name.
-4. Reopen the view later from **Saved views**.
-
-Deleting a saved view does not delete any stored requests. API clients can use:
-
-- `GET /api/request-views`
-- `POST /api/request-views`
-- `DELETE /api/request-views/{view_id}`
+Open **Settings** to configure request retention. A saved policy is applied at application startup, or it can be executed immediately with **Delete expired requests now**. Cleanup removes associated validation and delivery diagnostic records.

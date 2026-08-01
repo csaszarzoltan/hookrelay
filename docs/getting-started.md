@@ -140,3 +140,15 @@ By default, hookrelay blocks forwarding to:
 - Ports below 1024
 
 To allow private targets, use the `--allow-private` flag on `forward`.
+
+
+## Protect remote access (v0.9.0+)
+
+Hookrelay stays unauthenticated when `HOOKRELAY_API_TOKEN` is unset, which preserves the local single-user workflow. Before binding the server to an interface reachable by other machines, configure a long random token:
+
+```bash
+export HOOKRELAY_API_TOKEN="replace-with-a-long-random-secret"
+hookrelay serve --host 0.0.0.0
+```
+
+Use the same environment variable when running a forwarding client. The client sends it as a Bearer token during the relay WebSocket handshake. Browser users sign in through `/dashboard/login`. Use a TLS-terminating reverse proxy for network deployments.

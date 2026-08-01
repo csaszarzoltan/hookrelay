@@ -1,6 +1,6 @@
 # hookrelay 🪝
 
-**Webhook relay tool for local development.** CLI-first ngrok alternative — forward webhooks to localhost, inspect payloads in real-time, replay historical requests, and filter by source. Now with a **Web Dashboard** for visual debugging and resilient daily workflows.
+**Webhook relay tool for local development.** CLI-first ngrok alternative — forward webhooks to localhost, inspect payloads in real-time, replay historical requests, and filter by source. Now with a **Web Dashboard** for visual debugging.
 
 [![GitHub Release](https://img.shields.io/github/v/release/csaszarzoltan/hookrelay?logo=github)](https://github.com/csaszarzoltan/hookrelay/releases)
 [![Python](https://img.shields.io/badge/python-3.11+-blue?logo=python)](https://python.org)
@@ -182,7 +182,7 @@ python -m venv .venv && source .venv/bin/activate
 pip install -e ".[dev]"
 
 # Run tests
-pytest -q
+pytest tests/ -v
 
 # Lint
 ruff check src/ tests/
@@ -192,7 +192,29 @@ ruff check src/ tests/
 
 MIT — see [LICENSE](LICENSE) (not present; MIT applies by default per `pyproject.toml`).
 
-### Product and implementation reports
 
-- `docs/product-ux-requirements-report.md` contains the full product, UX, and requirements analysis.
-- `IMPLEMENTATION_REPORT.md` documents implemented scope, decisions, tests, assumptions, and remaining opportunities.
+### Privacy and retention
+
+Open `/dashboard/settings` to configure request retention from 1 to 3650 days. The default is 30 days. The policy runs at server startup and can also be applied immediately from the dashboard. Stored local-response bodies are capped at 16 KiB; common credential and cookie response headers are masked before persistence.
+
+### Implementation report
+
+See `IMPLEMENTATION_REPORT.md` for product rationale, requirements, changed modules, TDD notes, assumptions, validation results, and deferred opportunities.
+
+
+### Optional access protection
+
+Local development remains open by default. To protect a server that is reachable by other users or networks, set a strong token before starting Hookrelay:
+
+```bash
+export HOOKRELAY_API_TOKEN="replace-with-a-long-random-secret"
+hookrelay serve
+```
+
+The browser redirects protected dashboard pages to `/dashboard/login`. API clients use:
+
+```http
+Authorization: Bearer replace-with-a-long-random-secret
+```
+
+The forwarding CLI reads the same environment variable and adds the Authorization header automatically. `/health`, `/webhook/{channel}`, and dashboard static assets remain public so health monitors and external webhook providers can continue to operate. Use HTTPS whenever the server is accessed across a network.

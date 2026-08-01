@@ -50,7 +50,6 @@ class WebSocketClient:
         hostname = (urlparse(self.target_url).hostname or "").lower()
         if hostname.endswith(".invalid") or hostname == "invalid":
             raise ValueError("Reserved .invalid target cannot be forwarded")
-
         method = request_data.get("method", "POST").upper()
         headers = request_data.get("headers", {})
         body = request_data.get("body")
@@ -103,10 +102,14 @@ def connect_and_forward(
     Runs until disconnected. Calls on_request(request_data) for each
     received webhook before forwarding.
     """
+    import os
+
     import websocket as ws
 
     ws_url = f"{server_url.rstrip('/')}/ws/{channel}"
-    ws_conn = ws.create_connection(ws_url, timeout=timeout)
+    token = os.getenv("HOOKRELAY_API_TOKEN", "").strip()
+    headers = [f"Authorization: Bearer {token}"] if token else []
+    ws_conn = ws.create_connection(ws_url, timeout=timeout, header=headers)
 
     try:
         while True:
@@ -120,31 +123,37 @@ def connect_and_forward(
                 continue
             if message_type not in (None, "webhook", "replay"):
                 continue
-
             request_data = data.get("data", data)
             if on_request:
                 on_request(request_data)
-
             client = WebSocketClient(server_url, channel, target_url)
-            client._ws = ws_conn  # reuse connection
+            client._ws = ws_conn
             started = time.perf_counter()
-            report = {
-                "request_id": request_data.get("request_id"),
-                "target_url": target_url,
-            }
+            report = {"request_id": request_data.get("request_id"), "target_url": target_url}
             try:
                 response = client.forward_to_local(request_data, timeout=timeout)
                 status_code = response.get("status")
+                headers = response.get("headers", {})
+                sensitive = {"authorization", "proxy-authorization", "cookie", "set-cookie", "x-api-key", "x-auth-token", "api-key"}
+                safe_headers = {key: ("••••••••" if key.lower() in sensitive else value) for key, value in headers.items()}
+                body_value = response.get("body", b"")
+                if isinstance(body_value, bytes):
+                    body_text = body_value.decode("utf-8", errors="replace")
+                else:
+                    body_text = str(body_value)
+                raw = body_text.encode("utf-8")
+                truncated = len(raw) > 16384
+                if truncated:
+                    body_text = raw[:16384].decode("utf-8", errors="ignore")
                 report.update({
                     "status": "delivered" if status_code is not None and status_code < 400 else "target_error",
                     "response_status": status_code,
+                    "response_headers": safe_headers,
+                    "response_body": body_text,
+                    "response_body_truncated": truncated,
                 })
             except Exception as exc:
-                report.update({
-                    "status": "transport_error",
-                    "response_status": None,
-                    "error": str(exc),
-                })
+                report.update({"status": "transport_error", "error": str(exc)})
             report["duration_ms"] = round((time.perf_counter() - started) * 1000, 2)
             ws_conn.send(json.dumps({"type": "delivery_result", "data": report}))
     finally:

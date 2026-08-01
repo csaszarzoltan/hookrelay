@@ -3,20 +3,24 @@
 from __future__ import annotations
 
 from fastapi import FastAPI, Request, WebSocket
-from fastapi.responses import JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from hookrelay import __version__, _storage
-from hookrelay.dashboard import (
-    create_dashboard_router,
-    get_live_manager,
-    get_relay_manager,
+from hookrelay.auth import (
+    SESSION_COOKIE,
+    configured_token,
+    session_matches,
+    session_value,
+    token_matches,
 )
+from hookrelay.dashboard import create_dashboard_router
+from hookrelay.relay import RelayManager
 from hookrelay.storage import Storage
 
 # Module-level shared instance (for CLI access)
-_relay_manager = get_relay_manager()
+_relay_manager = RelayManager()
 
 
 def _get_or_create_storage(db_path: str | None = None) -> Storage:
@@ -40,6 +44,16 @@ def _register_relay_ws(app: FastAPI) -> None:
 
     @app.websocket("/ws/{channel}")
     async def websocket_endpoint(ws: WebSocket, channel: str):
+        auth_token = configured_token()
+        bearer = ws.headers.get("authorization", "")
+        bearer_token = bearer[7:] if bearer.lower().startswith("bearer ") else None
+        if auth_token and not (
+            token_matches(ws.query_params.get("token"), auth_token)
+            or token_matches(bearer_token, auth_token)
+            or session_matches(ws.cookies.get(SESSION_COOKIE), auth_token)
+        ):
+            await ws.close(code=1008, reason="Authentication required")
+            return
         await ws.accept()
         _relay_manager.register_client(channel, ws)
         import json
@@ -59,22 +73,17 @@ def _register_relay_ws(app: FastAPI) -> None:
                     request_id = data.get("request_id")
                     if request_id:
                         store = _get_or_create_storage()
-                        try:
-                            store.store_delivery_attempt(
-                                request_id=request_id,
-                                channel=channel,
-                                target_url=data.get("target_url"),
-                                status=data.get("status", "transport_error"),
-                                response_status=data.get("response_status"),
-                                duration_ms=data.get("duration_ms"),
-                                error=data.get("error"),
-                            )
-                            await get_live_manager().broadcast({
-                                "type": "delivery_result",
-                                "data": {**data, "channel": channel},
-                            })
-                        except Exception:
-                            pass
+                        store.store_delivery_attempt(
+                            request_id=request_id,
+                            channel=channel,
+                            target_url=data.get("target_url"),
+                            status=data.get("status", "transport_error"),
+                            response_status=data.get("response_status"),
+                            duration_ms=data.get("duration_ms"),
+                            error=data.get("error"),
+                            response_headers=data.get("response_headers"),
+                            response_body=data.get("response_body"),
+                        )
         except Exception:
             pass
         finally:
@@ -245,37 +254,33 @@ async def _handle_webhook(channel: str, request: Request):
     except Exception:
         pass
 
-    # Forward the complete request to relay clients on the selected channel.
-    relay_payload = {
-        "request_id": request_id,
-        "channel": channel,
-        "method": method,
-        "path": result.get("path", "/"),
-        "headers": headers,
-        "body": body.decode("utf-8", errors="replace"),
-        "query_params": query_params,
-        "source_ip": source_ip,
-        "received_at": result.get("received_at", ""),
-    }
-    forwarded_clients = await get_relay_manager().broadcast_async(
-        channel, {"type": "webhook", "data": relay_payload}
-    )
+    # Forward the full request to connected relay clients.
+    await _relay_manager.broadcast_async(channel, {
+        "type": "webhook",
+        "data": {
+            "request_id": request_id,
+            "channel": channel,
+            "method": method,
+            "path": result.get("path", "/"),
+            "headers": headers,
+            "body": body.decode("utf-8", errors="replace"),
+            "query_params": query_params,
+            "source_ip": source_ip,
+            "received_at": result.get("received_at", ""),
+        },
+    })
 
-    # Broadcast a complete, JSON-safe summary to connected dashboards.
+    # Broadcast via WebSocket
     try:
-        await get_live_manager().broadcast({
+        from hookrelay.dashboard.connection_manager import ConnectionManager
+        live_mgr = ConnectionManager()
+        import asyncio
+        asyncio.ensure_future(live_mgr.broadcast({
             "type": "webhook",
-            "data": {
-                "request_id": request_id,
-                "channel": channel,
-                "method": method,
-                "path": result.get("path", "/"),
-                "source_ip": source_ip,
-                "received_at": result.get("received_at", ""),
-            },
-        })
+            "channel": channel,
+            "request_id": request_id,
+        }))
     except Exception:
-        # Dashboard delivery must never block webhook ingestion.
         pass
 
     return JSONResponse(
@@ -285,7 +290,6 @@ async def _handle_webhook(channel: str, request: Request):
             "channel": channel,
             "method": method,
             "path": result.get("path", "/"),
-            "forwarded_clients": forwarded_clients,
         },
     )
 
@@ -296,11 +300,92 @@ def create_app() -> FastAPI:
     Returns:
         A configured FastAPI application with all routes mounted.
     """
+    # Apply the persisted retention policy on every server startup.
+    store = _get_or_create_storage()
+    retention_days = store.get_setting("retention_days", 30)
+    store.purge_requests_older_than(retention_days)
+
     app = FastAPI(
         title="Hookrelay",
         version=__version__,
         description="Webhook relay and debugging dashboard",
     )
+    auth_token = configured_token()
+
+    @app.middleware("http")
+    async def optional_authentication(request: Request, call_next):
+        """Protect dashboard and APIs only when a token is configured."""
+        if not auth_token:
+            return await call_next(request)
+        path = request.url.path
+        public = path in {"/health", "/", "/dashboard/login"} or path.startswith(
+            ("/webhook/", "/dashboard/static/")
+        )
+        if public:
+            return await call_next(request)
+        bearer = request.headers.get("authorization", "")
+        bearer_token = bearer[7:] if bearer.lower().startswith("bearer ") else None
+        authenticated = token_matches(bearer_token, auth_token) or session_matches(
+            request.cookies.get(SESSION_COOKIE), auth_token
+        )
+        if authenticated:
+            return await call_next(request)
+        if path.startswith("/dashboard/"):
+            return RedirectResponse(
+                url="/dashboard/login?next=" + path, status_code=303
+            )
+        return JSONResponse(
+            status_code=401,
+            content={"error": "Authentication required", "code": "unauthorized"},
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    @app.get("/dashboard/login", response_class=HTMLResponse)
+    async def login_page(request: Request, error: str | None = None):
+        if not auth_token:
+            return RedirectResponse(url="/dashboard/", status_code=303)
+        message = '<p class="login-error" role="alert">Invalid access token.</p>' if error else ""
+        return HTMLResponse(f"""<!DOCTYPE html><html lang="en"><head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Sign in — Hookrelay</title><link rel="stylesheet" href="/dashboard/static/style.css"></head>
+<body><main class="login-shell"><section class="login-card"><h1>Hookrelay</h1>
+<p>Enter the access token configured for this server.</p>{message}
+<form method="post" action="/dashboard/login">
+<label for="access-token">Access token</label>
+<input id="access-token" name="token" type="password" required autofocus autocomplete="current-password">
+<input name="next" type="hidden" value="{request.query_params.get('next', '/dashboard/')}">
+<button class="btn btn-primary" type="submit">Sign in</button></form></section></main></body></html>""")
+
+    @app.post("/dashboard/login")
+    async def login_submit(request: Request):
+        from urllib.parse import parse_qs
+
+        values = parse_qs((await request.body()).decode("utf-8", errors="replace"))
+        candidate = values.get("token", [""])[0]
+        next_path = values.get("next", ["/dashboard/"])[0]
+        if not next_path.startswith("/dashboard/") or next_path.startswith("//"):
+            next_path = "/dashboard/"
+        if not token_matches(candidate, auth_token):
+            return HTMLResponse(
+                (await login_page(request, error="invalid")).body,
+                status_code=401,
+            )
+        response = RedirectResponse(url=next_path, status_code=303)
+        response.set_cookie(
+            SESSION_COOKIE,
+            session_value(auth_token),
+            httponly=True,
+            secure=request.url.scheme == "https",
+            samesite="strict",
+            max_age=28800,
+        )
+        return response
+
+    @app.post("/dashboard/logout")
+    async def logout():
+        response = RedirectResponse(url="/dashboard/login", status_code=303)
+        response.delete_cookie(SESSION_COOKIE)
+        return response
 
     # Health endpoint
     @app.get("/health")
@@ -332,6 +417,27 @@ def create_app() -> FastAPI:
 
     # Register schema API routes
     _register_schema_api_routes(app)
+
+
+    @app.get("/api/settings/retention")
+    async def get_retention():
+        store = _get_or_create_storage()
+        return {"days": store.get_setting("retention_days", 30)}
+
+    @app.put("/api/settings/retention")
+    async def update_retention(body: dict):
+        days = body.get("days")
+        if not isinstance(days, int) or days < 1 or days > 3650:
+            return JSONResponse(status_code=422, content={"error": "days must be an integer from 1 to 3650"})
+        store = _get_or_create_storage()
+        store.set_setting("retention_days", days)
+        return {"days": days}
+
+    @app.post("/api/settings/retention/purge")
+    async def purge_retention():
+        store = _get_or_create_storage()
+        days = store.get_setting("retention_days", 30)
+        return {"days": days, "deleted": store.purge_requests_older_than(days)}
 
     return app
 

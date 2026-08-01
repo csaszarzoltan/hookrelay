@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Settings — Hookrelay Dashboard</title>
+    <link rel="stylesheet" href="/dashboard/static/style.css">
+</head>
+<body>
+    <nav class="dashboard-nav">
+        <div class="nav-brand">Hookrelay</div>
+        <div class="nav-links">
+            <a href="/dashboard/">Live Feed</a>
+            <a href="/dashboard/history">History</a>
+            <a href="/dashboard/settings" class="active">Settings</a>
+            {% if auth_enabled() %}<form method="post" action="/dashboard/logout" class="nav-logout"><button type="submit">Sign out</button></form>{% endif %}
+        </div>
+    </nav>
+    <main class="dashboard-main">
+        <header class="page-header"><h1>Settings</h1></header>
+        <section class="settings-card" aria-labelledby="retention-heading">
+            <h2 id="retention-heading">Request retention</h2>
+            <p>Choose how long stored webhook requests and their diagnostic history are retained.</p>
+            <label for="retention-days">Retention period in days</label>
+            <input id="retention-days" type="number" min="1" max="3650" value="{{ retention_days }}">
+            <div class="settings-actions">
+                <button id="save-retention" class="btn btn-primary" type="button">Save retention</button>
+                <button id="purge-now" class="btn btn-danger" type="button">Delete expired requests now</button>
+            </div>
+            <div id="retention-result" role="status" aria-live="polite"></div>
+        </section>
+        <section class="settings-card" aria-labelledby="security-heading">
+            <h2 id="security-heading">Access protection</h2>
+            {% if auth_enabled() %}
+            <p><span class="security-state protected">Protected</span> Dashboard, API, and relay WebSocket access require the configured token.</p>
+            {% else %}
+            <p><span class="security-state open">Local open mode</span> Set <code>HOOKRELAY_API_TOKEN</code> before starting the server to protect remote access.</p>
+            {% endif %}
+        </section>
+
+        <section class="settings-card" aria-labelledby="response-heading">
+            <h2 id="response-heading">Response diagnostics</h2>
+            <p>Response headers are redacted for common secret fields. Response bodies are limited to 16 KiB and marked when truncated.</p>
+        </section>
+    </main>
+    <script src="/dashboard/static/dashboard.js"></script>
+</body>
+</html>

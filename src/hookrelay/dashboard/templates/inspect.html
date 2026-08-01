@@ -12,6 +12,8 @@
         <div class="nav-links">
             <a href="/dashboard/">Live Feed</a>
             <a href="/dashboard/history">History</a>
+                    <a href="/dashboard/settings">Settings</a>
+            {% if auth_enabled() %}<form method="post" action="/dashboard/logout" class="nav-logout"><button type="submit">Sign out</button></form>{% endif %}
         </div>
     </nav>
 
@@ -37,11 +39,11 @@
                 <h3>Errors ({{ validation_result.errors|length }})</h3>
                 {% for error in validation_result.errors %}
                 <div class="validation-error">
-                    <button type="button" class="error-header" aria-expanded="false">
+                    <div class="error-header" onclick="this.parentElement.classList.toggle('expanded')">
                         <span class="severity severity-error">error</span>
                         <span class="error-path">{{ error.path }}</span>
                         <span class="toggle-icon">▶</span>
-                    </button>
+                    </div>
                     <div class="error-body">
                         <p><strong>Message:</strong> {{ error.message }}</p>
                         {% if error.schema_path %}<p><strong>Schema Path:</strong> {{ error.schema_path }}</p>{% endif %}
@@ -57,11 +59,11 @@
                 <h3>Warnings ({{ validation_result.warnings|length }})</h3>
                 {% for warn in validation_result.warnings %}
                 <div class="validation-error">
-                    <button type="button" class="error-header" aria-expanded="false">
+                    <div class="error-header" onclick="this.parentElement.classList.toggle('expanded')">
                         <span class="severity severity-warning">warning</span>
                         <span class="error-path">{{ warn.path }}</span>
                         <span class="toggle-icon">▶</span>
-                    </button>
+                    </div>
                     <div class="error-body">
                         <p><strong>Message:</strong> {{ warn.message }}</p>
                     </div>
@@ -75,11 +77,11 @@
                 <h3>Info ({{ validation_result.infos|length }})</h3>
                 {% for info in validation_result.infos %}
                 <div class="validation-error">
-                    <button type="button" class="error-header" aria-expanded="false">
+                    <div class="error-header" onclick="this.parentElement.classList.toggle('expanded')">
                         <span class="severity severity-info">info</span>
                         <span class="error-path">{{ info.path }}</span>
                         <span class="toggle-icon">▶</span>
-                    </button>
+                    </div>
                     <div class="error-body">
                         <p><strong>Message:</strong> {{ info.message }}</p>
                     </div>
@@ -90,29 +92,22 @@
         </section>
         {% endif %}
 
-        <section class="delivery-timeline" aria-labelledby="delivery-heading">
-            <h2 id="delivery-heading">Delivery timeline</h2>
-            {% if delivery_attempts %}
-            <ol class="timeline-list">
-                {% for attempt in delivery_attempts %}
-                <li class="timeline-item status-{{ attempt.status }}">
-                    <div>
-                        <strong>{% if attempt.status == 'delivered' %}Delivered{% elif attempt.status == 'target_error' %}Target error{% else %}Transport error{% endif %}</strong>
-                        {% if attempt.response_status is not none %}<span class="badge">HTTP {{ attempt.response_status }}</span>{% endif %}
-                    </div>
-                    <div class="timeline-meta">
-                        {% if attempt.target_url %}<code>{{ attempt.target_url }}</code>{% endif %}
-                        {% if attempt.duration_ms is not none %}<span>{{ attempt.duration_ms }} ms</span>{% endif %}
-                        <time>{{ attempt.attempted_at }}</time>
-                    </div>
-                    {% if attempt.error %}<p class="delivery-error">{{ attempt.error }}</p>{% endif %}
-                </li>
-                {% endfor %}
-            </ol>
-            {% else %}
-            <p class="muted">No delivery result has been reported yet. Confirm that a forwarding client is connected to channel <code>{{ detail.channel }}</code>.</p>
-            {% endif %}
+        {% if delivery_attempts %}
+        <section class="delivery-timeline">
+            <h2>Delivery and response details</h2>
+            {% for attempt in delivery_attempts %}
+            <article class="delivery-attempt">
+                <h3>{{ attempt.status|replace('_', ' ')|title }}{% if attempt.response_status is not none %} · HTTP {{ attempt.response_status }}{% endif %}</h3>
+                <p>{{ attempt.target_url or 'Connected channel target' }}{% if attempt.duration_ms is not none %} · {{ attempt.duration_ms }} ms{% endif %}</p>
+                {% if attempt.response_headers %}
+                <details><summary>Response headers</summary><table class="detail-table">{% for key, value in attempt.response_headers.items() %}<tr><th>{{ key }}</th><td>{{ value }}</td></tr>{% endfor %}</table></details>
+                {% endif %}
+                {% if attempt.response_body is not none %}<details open><summary>Response body{% if attempt.response_body_truncated %} (truncated){% endif %}</summary><pre class="body-content">{{ attempt.response_body }}</pre></details>{% endif %}
+                {% if attempt.error %}<p class="delivery-error">{{ attempt.error }}</p>{% endif %}
+            </article>
+            {% endfor %}
         </section>
+        {% endif %}
 
         <section class="request-details">
             <h2>Request Info</h2>
@@ -146,8 +141,6 @@
 
         <section class="request-actions">
             <a href="/dashboard/replay/{{ detail.request_id }}" class="btn">Replay Request</a>
-            <button type="button" class="btn btn-danger" id="delete-request" data-request-id="{{ detail.request_id }}">Delete stored request</button>
-            <span id="delete-result" role="status" aria-live="polite"></span>
         </section>
 
         {% else %}

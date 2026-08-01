@@ -137,3 +137,8 @@ hookrelay status [--server URL]
 hookrelay status
 hookrelay status --server https://relay.example.com
 ```
+
+
+## Authentication environment variable
+
+`HOOKRELAY_API_TOKEN` enables access protection on the server and supplies the Bearer token for forwarding clients. It is intentionally not accepted as a command-line option, which reduces accidental disclosure through shell history and process listings.

@@ -54,26 +54,25 @@ class RelayManager:
         return received_count
 
     async def broadcast_async(self, channel: str, message: dict[str, Any]) -> int:
-        """Send JSON to ASGI WebSocket clients registered on a channel."""
-        if channel not in self._channels:
-            return 0
-        received_count = 0
-        still_connected: list[Any] = []
-        for ws in self._channels[channel]:
+        """Send a message to ASGI or synchronous WebSocket clients."""
+        clients = self._channels.get(channel, [])
+        sent = 0
+        alive = []
+        for websocket in clients:
             try:
-                if hasattr(ws, "send_json"):
-                    await ws.send_json(message)
+                if hasattr(websocket, "send_json"):
+                    await websocket.send_json(message)
                 else:
-                    ws.send(json.dumps(message))
-                received_count += 1
-                still_connected.append(ws)
+                    websocket.send(json.dumps(message))
+                sent += 1
+                alive.append(websocket)
             except Exception:
                 pass
-        if still_connected:
-            self._channels[channel] = still_connected
+        if alive:
+            self._channels[channel] = alive
         else:
             self._channels.pop(channel, None)
-        return received_count
+        return sent
 
     def get_connected_clients(self, channel: str) -> int:
         """Return the count of connected clients on a channel."""
@@ -82,10 +81,6 @@ class RelayManager:
     def has_connected_clients(self, channel: str) -> bool:
         """Check if any clients are connected on a channel."""
         return self.get_connected_clients(channel) > 0
-
-    def channel_counts(self) -> dict[str, int]:
-        """Return active client counts by channel for readiness displays."""
-        return {channel: len(clients) for channel, clients in self._channels.items()}
 
     def send_heartbeat(self, channel: str) -> None:
         """Send a heartbeat ping to all clients on a channel."""
