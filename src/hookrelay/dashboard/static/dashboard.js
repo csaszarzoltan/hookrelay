@@ -1,103 +1,171 @@
-// Hookrelay Dashboard — Live updates and interactions
-
+// Hookrelay Dashboard: resilient live updates and workflow controls.
 (function () {
     'use strict';
-
-    // ---- Live feed WebSocket ----
     const liveFeed = document.getElementById('live-feed');
-    if (liveFeed) {
+    const liveBody = document.getElementById('live-feed-body');
+    const statusNode = document.getElementById('connection-status');
+    const pauseButton = document.getElementById('pause-live');
+    const totalNode = document.getElementById('total-count');
+    let socket = null;
+    let reconnectAttempts = 0;
+    let reconnectTimer = null;
+    let paused = false;
+    let latestCursor = parseInt(window.sessionStorage.getItem('hookrelayEventCursor') || '0', 10);
+    const bufferedRequests = [];
+    const maxRows = 50;
+
+    function setStatus(state, label) {
+        if (!statusNode) return;
+        statusNode.className = 'connection-status ' + state;
+        statusNode.textContent = label;
+    }
+    function insertLiveRequest(request) {
+        if (!liveBody || !request || !request.request_id) return;
+        const existing = Array.from(liveBody.rows).find(function (row) {
+            return row.dataset.requestId === request.request_id;
+        });
+        if (existing) existing.remove();
+        const row = document.createElement('tr');
+        row.dataset.requestId = request.request_id;
+        const values = [request.received_at ? request.received_at.slice(-12) : '', request.method, request.channel, request.path, request.source_ip];
+        values.forEach(function (value, index) {
+            const cell = document.createElement('td');
+            if (index === 1) {
+                const badge = document.createElement('span');
+                badge.className = 'method method-' + String(value || '').toLowerCase();
+                badge.textContent = value || '';
+                cell.appendChild(badge);
+            } else cell.textContent = value || '';
+            row.appendChild(cell);
+        });
+        const idCell = document.createElement('td');
+        const link = document.createElement('a');
+        link.className = 'req-link';
+        link.href = '/dashboard/inspect/' + encodeURIComponent(request.request_id);
+        link.textContent = request.request_id.slice(0, 12);
+        idCell.appendChild(link);
+        row.appendChild(idCell);
+        liveBody.prepend(row);
+        while (liveBody.rows.length > maxRows) liveBody.deleteRow(liveBody.rows.length - 1);
+        const empty = document.getElementById('live-empty-state');
+        if (empty) empty.remove();
+        if (totalNode) totalNode.textContent = String((parseInt(totalNode.textContent, 10) || 0) + 1);
+    }
+    function receiveRequest(request) {
+        if (paused) {
+            bufferedRequests.push(request);
+            pauseButton.textContent = 'Resume updates (' + bufferedRequests.length + ')';
+        } else insertLiveRequest(request);
+    }
+    function connectLiveFeed() {
+        if (!liveFeed) return;
+        clearTimeout(reconnectTimer);
         const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
         const wsUrl = protocol + '//' + window.location.host + '/dashboard/ws/live';
-        const ws = new WebSocket(wsUrl);
-
-        ws.onmessage = function (event) {
-            const data = JSON.parse(event.data);
-            if (data.type === 'webhook') {
-                // Refresh the page to show new data
-                setTimeout(function () { window.location.reload(); }, 500);
+        setStatus('reconnecting', reconnectAttempts ? 'Reconnecting…' : 'Connecting…');
+        socket = new WebSocket(wsUrl);
+        socket.onopen = function () {
+            reconnectAttempts = 0;
+            setStatus('connected', 'Live connected');
+            fetch('/api/events?after_cursor=' + latestCursor + '&event_type=webhook.received')
+                .then(function (response) { return response.ok ? response.json() : { items: [] }; })
+                .then(function (payload) {
+                    (payload.items || []).forEach(function (event) {
+                        receiveRequest(event.data);
+                        latestCursor = Math.max(latestCursor, event.cursor || 0);
+                    });
+                    window.sessionStorage.setItem('hookrelayEventCursor', String(latestCursor));
+                });
+        };
+        socket.onmessage = function (event) {
+            let message;
+            try { message = JSON.parse(event.data); } catch (_) { return; }
+            if (message.type === 'webhook' || message.event_type === 'webhook.received') {
+                receiveRequest(message.data || message);
+                latestCursor = Math.max(latestCursor, message.cursor || 0);
+                window.sessionStorage.setItem('hookrelayEventCursor', String(latestCursor));
             }
         };
-
-        ws.onclose = function () {
-            // Reconnect after 3 seconds
-            setTimeout(function () {
-                new WebSocket(wsUrl);
-            }, 3000);
+        socket.onerror = function () { socket.close(); };
+        socket.onclose = function () {
+            setStatus('disconnected', 'Disconnected');
+            reconnectAttempts += 1;
+            const delay = Math.min(30000, 1000 * Math.pow(2, Math.min(reconnectAttempts, 5)));
+            reconnectTimer = setTimeout(connectLiveFeed, delay);
         };
     }
+    if (pauseButton) pauseButton.addEventListener('click', function () {
+        paused = !paused;
+        pauseButton.setAttribute('aria-pressed', String(paused));
+        if (paused) pauseButton.textContent = 'Resume updates';
+        else {
+            bufferedRequests.splice(0).reverse().forEach(insertLiveRequest);
+            pauseButton.textContent = 'Pause updates';
+        }
+    });
+    connectLiveFeed();
 
-    // ---- Expandable validation errors ----
     document.querySelectorAll('.validation-error .error-header').forEach(function (header) {
         header.addEventListener('click', function () {
-            header.parentElement.classList.toggle('expanded');
+            const expanded = header.getAttribute('aria-expanded') === 'true';
+            header.setAttribute('aria-expanded', String(!expanded));
+            header.parentElement.classList.toggle('expanded', !expanded);
         });
     });
 
-    // ---- Replay form ----
     const replayForm = document.getElementById('replay-form');
-    if (replayForm) {
-        window.replayRequest = function () {
-            const targetUrl = document.getElementById('target-url').value;
-            const requestId = window.location.pathname.split('/').pop();
-            const resultDiv = document.getElementById('replay-result');
+    if (replayForm) window.replayRequest = function () {
+        const result = document.getElementById('replay-result');
+        const requestId = window.location.pathname.split('/').pop();
+        const target = document.getElementById('target-url').value.trim();
+        fetch('/api/replay/' + encodeURIComponent(requestId), {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ target: target || undefined })
+        }).then(async function (response) {
+            const payload = await response.json().catch(function () { return {}; });
+            if (!response.ok) throw new Error(payload.error || 'Replay failed');
+            result.className = 'success';
+            result.textContent = 'Replay sent on channel ' + payload.channel + '.';
+        }).catch(function (error) { result.className = 'error'; result.textContent = error.message; });
+        result.style.display = 'block';
+        return false;
+    };
 
-            fetch('/api/replay/' + requestId, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ target: targetUrl || undefined }),
-            })
-                .then(function (response) {
-                    if (response.ok) {
-                        resultDiv.className = 'success';
-                        resultDiv.textContent = 'Replay successful!';
-                    } else {
-                        resultDiv.className = 'error';
-                        resultDiv.textContent = 'Replay failed: ' + response.statusText;
-                    }
-                    resultDiv.style.display = 'block';
-                })
-                .catch(function (err) {
-                    resultDiv.className = 'error';
-                    resultDiv.textContent = 'Error: ' + err.message;
-                    resultDiv.style.display = 'block';
-                });
+    const savedView = document.getElementById('saved-view');
+    if (savedView) savedView.addEventListener('change', function () {
+        if (savedView.value) window.location.assign('/dashboard/history?view=' + encodeURIComponent(savedView.value));
+    });
+    const saveView = document.getElementById('save-view');
+    if (saveView) saveView.addEventListener('click', function () {
+        const name = window.prompt('Name this request view:');
+        if (!name) return;
+        const filters = {};
+        new FormData(document.getElementById('history-filter-form')).forEach(function (value, key) { if (value) filters[key] = value; });
+        fetch('/api/request-views', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: name, filters: filters }) })
+            .then(async function (response) { const payload = await response.json(); if (!response.ok) throw new Error(payload.error); window.location.assign('/dashboard/history?view=' + payload.view_id); })
+            .catch(function (error) { document.getElementById('view-result').textContent = error.message; });
+    });
+    const deleteView = document.getElementById('delete-view');
+    if (deleteView) deleteView.addEventListener('click', function () {
+        if (!window.confirm('Delete this saved view?')) return;
+        fetch('/api/request-views/' + encodeURIComponent(deleteView.dataset.viewId), { method: 'DELETE' })
+            .then(function (response) { if (!response.ok) throw new Error('Delete failed'); window.location.assign('/dashboard/history'); })
+            .catch(function (error) { document.getElementById('view-result').textContent = error.message; });
+    });
 
-            return false;
-        };
-    }
-    // ---- Retention settings ----
     const saveRetention = document.getElementById('save-retention');
     const purgeNow = document.getElementById('purge-now');
     const retentionResult = document.getElementById('retention-result');
-    function retentionDays() {
-        return parseInt(document.getElementById('retention-days').value, 10);
-    }
-    if (saveRetention) {
-        saveRetention.addEventListener('click', function () {
-            fetch('/api/settings/retention', {
-                method: 'PUT',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ days: retentionDays() })
-            }).then(async function (response) {
-                const payload = await response.json();
-                if (!response.ok) throw new Error(payload.error || 'Could not save retention');
-                retentionResult.textContent = 'Retention saved: ' + payload.days + ' days.';
-            }).catch(function (error) { retentionResult.textContent = error.message; });
-        });
-    }
-    if (purgeNow) {
-        purgeNow.addEventListener('click', function () {
-            if (!window.confirm('Delete all requests older than the configured retention period?')) return;
-            purgeNow.disabled = true;
-            fetch('/api/settings/retention/purge', { method: 'POST' })
-                .then(async function (response) {
-                    const payload = await response.json();
-                    if (!response.ok) throw new Error(payload.error || 'Cleanup failed');
-                    retentionResult.textContent = 'Cleanup complete. Deleted ' + payload.deleted + ' requests.';
-                }).catch(function (error) {
-                    retentionResult.textContent = error.message;
-                }).finally(function () { purgeNow.disabled = false; });
-        });
-    }
-
+    if (saveRetention) saveRetention.addEventListener('click', function () {
+        const days = parseInt(document.getElementById('retention-days').value, 10);
+        fetch('/api/settings/retention', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ days: days }) })
+            .then(async function (response) { const payload = await response.json(); if (!response.ok) throw new Error(payload.error); retentionResult.textContent = 'Retention saved: ' + payload.days + ' days.'; })
+            .catch(function (error) { retentionResult.textContent = error.message; });
+    });
+    if (purgeNow) purgeNow.addEventListener('click', function () {
+        if (!window.confirm('Delete expired requests now?')) return;
+        fetch('/api/settings/retention/purge', { method: 'POST' })
+            .then(function (response) { return response.json(); })
+            .then(function (payload) { retentionResult.textContent = 'Deleted ' + payload.deleted + ' requests.'; });
+    });
 })();

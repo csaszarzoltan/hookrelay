@@ -103,10 +103,16 @@ def connect_and_forward(
     received webhook before forwarding.
     """
     import os
+    from urllib.parse import quote
 
     import websocket as ws
 
-    ws_url = f"{server_url.rstrip('/')}/ws/{channel}"
+    metadata = (
+        f"target={quote(target_url, safe='')}"
+        f"&client_version={quote(__import__('hookrelay').__version__)}"
+        "&capabilities=delivery_results,replay"
+    )
+    ws_url = f"{server_url.rstrip('/')}/ws/{channel}?{metadata}"
     token = os.getenv("HOOKRELAY_API_TOKEN", "").strip()
     headers = [f"Authorization: Bearer {token}"] if token else []
     ws_conn = ws.create_connection(ws_url, timeout=timeout, header=headers)

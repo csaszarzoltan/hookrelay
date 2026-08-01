@@ -8,6 +8,9 @@ from datetime import UTC, datetime
 from typing import Any
 from uuid import uuid4
 
+from hookrelay.migrations import run_migrations
+from hookrelay.query import RequestQuery, decode_cursor, encode_cursor
+
 
 class Storage:
     """SQLite-backed storage for webhook requests."""
@@ -17,6 +20,7 @@ class Storage:
         self._conn = sqlite3.connect(db_path, check_same_thread=False)
         self._conn.row_factory = sqlite3.Row
         self._init_schema()
+        run_migrations(self._conn)
 
     def _init_schema(self) -> None:
         self._conn.executescript("""
@@ -83,8 +87,194 @@ class Storage:
                 setting_value TEXT NOT NULL,
                 updated_at TEXT NOT NULL
             );
+            CREATE TABLE IF NOT EXISTS request_views (
+                view_id TEXT PRIMARY KEY,
+                name TEXT NOT NULL UNIQUE COLLATE NOCASE,
+                filters TEXT NOT NULL DEFAULT '{}',
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
         """)
         self._conn.commit()
+
+    @property
+    def schema_version(self) -> int:
+        """Return the current database schema version."""
+        row = self._conn.execute(
+            "SELECT COALESCE(MAX(version), 0) AS version FROM schema_migrations"
+        ).fetchone()
+        return int(row["version"])
+
+    def migration_history(self) -> list[dict[str, Any]]:
+        """Return applied migrations in ascending order."""
+        rows = self._conn.execute(
+            "SELECT version, name, applied_at FROM schema_migrations ORDER BY version"
+        ).fetchall()
+        return [dict(row) for row in rows]
+
+    def append_event(self, envelope: dict[str, Any]) -> int:
+        """Append one canonical event and return its monotonic cursor."""
+        required = {"schema_version", "event_id", "event_type", "timestamp", "data"}
+        missing = required - envelope.keys()
+        if missing:
+            raise ValueError(f"event envelope missing fields: {sorted(missing)}")
+        cursor = self._conn.execute(
+            """INSERT INTO event_log
+               (event_id, schema_version, event_type, timestamp, correlation_id, data)
+               VALUES (?, ?, ?, ?, ?, ?)""",
+            (
+                envelope["event_id"], envelope["schema_version"],
+                envelope["event_type"], envelope["timestamp"],
+                envelope.get("correlation_id"), json.dumps(envelope["data"]),
+            ),
+        ).lastrowid
+        self._conn.commit()
+        return int(cursor)
+
+    def list_events(
+        self,
+        after_cursor: int = 0,
+        limit: int = 100,
+        event_type: str | None = None,
+    ) -> list[dict[str, Any]]:
+        """Return events after a cursor for reconnect reconciliation."""
+        if limit < 1 or limit > 1000:
+            raise ValueError("limit must be between 1 and 1000")
+        query = "SELECT * FROM event_log WHERE cursor > ?"
+        params: list[Any] = [after_cursor]
+        if event_type:
+            query += " AND event_type = ?"
+            params.append(event_type)
+        query += " ORDER BY cursor ASC LIMIT ?"
+        params.append(limit)
+        rows = self._conn.execute(query, params).fetchall()
+        result = []
+        for row in rows:
+            item = dict(row)
+            item["data"] = json.loads(item["data"])
+            result.append(item)
+        return result
+
+    def query_requests(self, query: RequestQuery) -> dict[str, Any]:
+        """Execute the canonical request query using opaque cursor pagination."""
+        if query.q:
+            items = self.search_requests(
+                query=query.q, channel=query.channel, limit=10000
+            )
+        else:
+            items = self.list_requests(channel=query.channel, limit=10000)
+        if query.methods:
+            items = [item for item in items if item.get("method") in query.methods]
+        if query.path:
+            items = [item for item in items if query.path in item.get("path", "")]
+        if query.received_from:
+            items = [item for item in items if item.get("received_at", "") >= query.received_from]
+        if query.received_to:
+            items = [item for item in items if item.get("received_at", "") <= query.received_to]
+        if query.replayed is not None:
+            items = [item for item in items if bool(item.get("replayed")) is query.replayed]
+        if query.validation_status:
+            filtered = []
+            for item in items:
+                results = self.get_validation_results_for_request(item["request_id"])
+                status = "not_checked"
+                if results:
+                    status = "valid" if results[0].get("valid", True) else "invalid"
+                if status == query.validation_status:
+                    filtered.append(item)
+            items = filtered
+        if query.delivery_status:
+            items = [
+                item for item in items
+                if (self.list_delivery_attempts(item["request_id"])[0]["status"]
+                    if self.list_delivery_attempts(item["request_id"])
+                    else "pending") == query.delivery_status
+            ]
+        items.sort(
+            key=lambda item: (item.get("received_at", ""), item.get("request_id", "")),
+            reverse=True,
+        )
+        if query.cursor:
+            cursor_time, cursor_id = decode_cursor(query.cursor)
+            items = [
+                item for item in items
+                if (item.get("received_at", ""), item.get("request_id", ""))
+                < (cursor_time, cursor_id)
+            ]
+        page = items[: query.limit]
+        next_cursor = None
+        if len(items) > query.limit and page:
+            last = page[-1]
+            next_cursor = encode_cursor(last["received_at"], last["request_id"])
+        return {
+            "schema_version": query.schema_version,
+            "items": page,
+            "next_cursor": next_cursor,
+            "applied_query": query.to_dict(),
+        }
+
+    @staticmethod
+    def _redact_audit_details(value: Any, key: str = "") -> Any:
+        sensitive = {"authorization", "cookie", "set-cookie", "token", "api_key", "api-key", "password"}
+        if key.lower() in sensitive:
+            return "••••••••"
+        if isinstance(value, dict):
+            return {k: Storage._redact_audit_details(v, k) for k, v in value.items()}
+        if isinstance(value, list):
+            return [Storage._redact_audit_details(item) for item in value]
+        return value
+
+    def record_audit_event(
+        self,
+        action: str,
+        actor: str,
+        object_type: str,
+        object_id: str | None,
+        outcome: str,
+        correlation_id: str | None = None,
+        details: dict[str, Any] | None = None,
+    ) -> str:
+        """Append a redacted, immutable audit record."""
+        audit_id = uuid4().hex
+        self._conn.execute(
+            """INSERT INTO audit_log
+               (audit_id, action, actor, object_type, object_id, outcome,
+                correlation_id, details, created_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (
+                audit_id, action, actor, object_type, object_id, outcome,
+                correlation_id,
+                json.dumps(self._redact_audit_details(details or {})),
+                datetime.now(UTC).isoformat(),
+            ),
+        )
+        self._conn.commit()
+        return audit_id
+
+    def list_audit_events(
+        self,
+        limit: int = 100,
+        action: str | None = None,
+        actor: str | None = None,
+    ) -> list[dict[str, Any]]:
+        """List immutable audit records newest first."""
+        query = "SELECT * FROM audit_log WHERE 1=1"
+        params: list[Any] = []
+        if action:
+            query += " AND action = ?"
+            params.append(action)
+        if actor:
+            query += " AND actor = ?"
+            params.append(actor)
+        query += " ORDER BY created_at DESC LIMIT ?"
+        params.append(min(max(limit, 1), 1000))
+        rows = self._conn.execute(query, params).fetchall()
+        result = []
+        for row in rows:
+            item = dict(row)
+            item["details"] = json.loads(item["details"])
+            result.append(item)
+        return result
 
     def store_request(self, request: dict[str, Any]) -> str:
         """Store a webhook request and return its ID."""
@@ -271,6 +461,50 @@ class Storage:
             (request_id,),
         )
         self._conn.commit()
+
+    def save_request_view(self, name: str, filters: dict[str, Any]) -> str:
+        """Save a named request query after validating supported fields."""
+        cleaned_name = name.strip()
+        if not cleaned_name:
+            raise ValueError("view name must not be empty")
+        existing = self._conn.execute(
+            "SELECT 1 FROM request_views WHERE name = ? COLLATE NOCASE",
+            (cleaned_name,),
+        ).fetchone()
+        if existing:
+            raise ValueError(f"request view '{cleaned_name}' already exists")
+        allowed = {"q", "channel", "method", "path", "validation_status", "limit"}
+        cleaned = {key: value for key, value in filters.items() if key in allowed and value not in (None, "")}
+        view_id = uuid4().hex
+        now = datetime.now(UTC).isoformat()
+        self._conn.execute(
+            "INSERT INTO request_views(view_id, name, filters, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
+            (view_id, cleaned_name, json.dumps(cleaned), now, now),
+        )
+        self._conn.commit()
+        return view_id
+
+    def get_request_view(self, view_id: str) -> dict[str, Any] | None:
+        row = self._conn.execute("SELECT * FROM request_views WHERE view_id = ?", (view_id,)).fetchone()
+        if row is None:
+            return None
+        item = dict(row)
+        item["filters"] = json.loads(item["filters"])
+        return item
+
+    def list_request_views(self) -> list[dict[str, Any]]:
+        rows = self._conn.execute("SELECT * FROM request_views ORDER BY name COLLATE NOCASE").fetchall()
+        result = []
+        for row in rows:
+            item = dict(row)
+            item["filters"] = json.loads(item["filters"])
+            result.append(item)
+        return result
+
+    def delete_request_view(self, view_id: str) -> bool:
+        cursor = self._conn.execute("DELETE FROM request_views WHERE view_id = ?", (view_id,))
+        self._conn.commit()
+        return cursor.rowcount > 0
 
     def search_requests(
         self,
@@ -611,6 +845,7 @@ class Storage:
         import json as json_mod
         from datetime import UTC, datetime
         from uuid import uuid4
+
 
         result_id = uuid4().hex
         now = datetime.now(tz=UTC).isoformat()

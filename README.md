@@ -12,6 +12,29 @@
 
 ## Features
 
+### What is new in 1.0.0
+
+- Explicit, versioned SQLite migrations with preserved legacy requests
+- Durable versioned event envelopes and monotonic reconnect cursors
+- Connection registry with session, target, client version, capabilities, heartbeat, and stale state
+- Canonical request-query schema with opaque cursor pagination
+- Append-only, redacted audit records for sensitive operations
+- Data introspection, connection, event, query, and audit APIs
+- **483 passing tests and zero failures**
+
+### Included from 0.9.1
+
+- Incremental Live Feed updates without page reloads
+- Visible live connection state, resilient reconnect, and pause/resume buffering
+- Full-text History search, path and validation filters, and saved request views
+- Correct stored-channel replay with actionable no-client feedback
+- Consistent sensitive request-header masking
+- Request deletion and delivery-attempt APIs
+- Restored delivery timeline and dashboard readiness API
+- **477 passing tests and zero failures**
+
+
+
 ### CLI
 - **Webhook relay** — forward webhooks from a public endpoint to `localhost` via a WebSocket tunnel
 - **Real-time inspection** — view method, headers, body, and query params as they arrive
@@ -218,3 +241,21 @@ Authorization: Bearer replace-with-a-long-random-secret
 ```
 
 The forwarding CLI reads the same environment variable and adds the Authorization header automatically. `/health`, `/webhook/{channel}`, and dashboard static assets remain public so health monitors and external webhook providers can continue to operate. Use HTTPS whenever the server is accessed across a network.
+
+
+### Release integrity
+
+Version 0.9.1 is a reliability restoration release. The generated ZIP is smoke-tested after packaging, and the complete committed test suite must pass before handoff. The product/UX assessment that drove this release is included at `docs/product-ux-requirements-report-0.9.md`; implementation details are in `IMPLEMENTATION_REPORT.md`.
+
+
+### Versioned data APIs
+
+Hookrelay 1.0 introduces explicit data contracts:
+
+- `GET /api/data/schema` reports the current database, event, and query schema versions.
+- `GET /api/connections` returns safe active-client metadata and computed stale state.
+- `GET /api/events?after_cursor=0` returns durable events in cursor order for reconnect recovery.
+- `GET /api/requests/query` supports canonical search, filters, and opaque cursor pagination.
+- `GET /api/audit` returns append-only redacted audit records.
+
+Database migrations run automatically when `Storage` opens a database. A database created by a newer unsupported Hookrelay version is rejected rather than modified.

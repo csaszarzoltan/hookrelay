@@ -15,12 +15,15 @@ from hookrelay.auth import (
     session_value,
     token_matches,
 )
-from hookrelay.dashboard import create_dashboard_router
-from hookrelay.relay import RelayManager
+from hookrelay.dashboard import create_dashboard_router, get_live_manager
+from hookrelay.events import create_event_envelope
+from hookrelay.migrations import CURRENT_SCHEMA_VERSION
+from hookrelay.query import RequestQuery
+from hookrelay.relay import get_shared_relay_manager
 from hookrelay.storage import Storage
 
 # Module-level shared instance (for CLI access)
-_relay_manager = RelayManager()
+_relay_manager = get_shared_relay_manager()
 
 
 def _get_or_create_storage(db_path: str | None = None) -> Storage:
@@ -55,14 +58,27 @@ def _register_relay_ws(app: FastAPI) -> None:
             await ws.close(code=1008, reason="Authentication required")
             return
         await ws.accept()
-        _relay_manager.register_client(channel, ws)
+        session_id = _relay_manager.register_client(
+            channel,
+            ws,
+            target_url=ws.query_params.get("target"),
+            client_version=ws.query_params.get("client_version"),
+            capabilities=[
+                item for item in ws.query_params.get("capabilities", "").split(",") if item
+            ],
+            session_id=ws.query_params.get("session_id"),
+        )
         import json
-        await ws.send_text(json.dumps({"type": "heartbeat", "channel": channel}))
+        await ws.send_text(json.dumps({
+            "type": "heartbeat", "channel": channel, "session_id": session_id,
+            "schema_version": 1,
+        }))
         try:
             while True:
                 raw = await ws.receive_text()
                 if raw == "ping":
-                    await ws.send_text(json.dumps({"type": "pong"}))
+                    _relay_manager.heartbeat(session_id)
+                    await ws.send_text(json.dumps({"type": "pong", "session_id": session_id}))
                     continue
                 try:
                     message = json.loads(raw)
@@ -270,16 +286,26 @@ async def _handle_webhook(channel: str, request: Request):
         },
     })
 
-    # Broadcast via WebSocket
-    try:
-        from hookrelay.dashboard.connection_manager import ConnectionManager
-        live_mgr = ConnectionManager()
-        import asyncio
-        asyncio.ensure_future(live_mgr.broadcast({
-            "type": "webhook",
-            "channel": channel,
+    # Persist and broadcast a versioned event for reconnect reconciliation.
+    event = create_event_envelope(
+        "webhook.received",
+        {
             "request_id": request_id,
-        }))
+            "channel": channel,
+            "method": method,
+            "path": result.get("path", "/"),
+            "source_ip": source_ip,
+            "received_at": result.get("received_at", ""),
+        },
+        correlation_id=request_id,
+    )
+    event["cursor"] = store.append_event(event)
+    store.record_audit_event(
+        "request.received", "system", "request", request_id, "success",
+        correlation_id=request_id, details={"channel": channel, "method": method},
+    )
+    try:
+        await get_live_manager().broadcast({"type": "webhook", **event})
     except Exception:
         pass
 
@@ -431,13 +457,89 @@ def create_app() -> FastAPI:
             return JSONResponse(status_code=422, content={"error": "days must be an integer from 1 to 3650"})
         store = _get_or_create_storage()
         store.set_setting("retention_days", days)
+        store.record_audit_event(
+            "retention.update", "local-session", "setting", "retention_days",
+            "success", details={"days": days},
+        )
         return {"days": days}
 
     @app.post("/api/settings/retention/purge")
     async def purge_retention():
         store = _get_or_create_storage()
         days = store.get_setting("retention_days", 30)
-        return {"days": days, "deleted": store.purge_requests_older_than(days)}
+        deleted = store.purge_requests_older_than(days)
+        store.record_audit_event(
+            "retention.purge", "local-session", "request_collection", None,
+            "success", details={"days": days, "deleted": deleted},
+        )
+        return {"days": days, "deleted": deleted}
+
+    @app.get("/api/data/schema")
+    async def data_schema():
+        store = _get_or_create_storage()
+        return {
+            "current_version": store.schema_version,
+            "supported_version": CURRENT_SCHEMA_VERSION,
+            "migrations": store.migration_history(),
+            "event_schema_version": 1,
+            "request_query_schema_version": 1,
+        }
+
+    @app.get("/api/connections")
+    async def connections(channel: str | None = None):
+        return _relay_manager.list_connections(channel=channel)
+
+    @app.get("/api/events")
+    async def events(
+        after_cursor: int = 0,
+        limit: int = 100,
+        event_type: str | None = None,
+    ):
+        store = _get_or_create_storage()
+        try:
+            items = store.list_events(after_cursor, limit, event_type)
+        except ValueError as exc:
+            return JSONResponse(status_code=422, content={"error": str(exc)})
+        return {
+            "schema_version": 1,
+            "items": items,
+            "next_cursor": items[-1]["cursor"] if items else after_cursor,
+        }
+
+    @app.get("/api/requests/query")
+    async def request_query(
+        q: str | None = None,
+        channel: str | None = None,
+        methods: str | None = None,
+        path: str | None = None,
+        validation_status: str | None = None,
+        delivery_status: str | None = None,
+        received_from: str | None = None,
+        received_to: str | None = None,
+        replayed: bool | None = None,
+        limit: int = 50,
+        cursor: str | None = None,
+    ):
+        store = _get_or_create_storage()
+        try:
+            query = RequestQuery(
+                q=q, channel=channel,
+                methods=[item for item in methods.split(",") if item] if methods else None,
+                path=path, validation_status=validation_status,
+                delivery_status=delivery_status, received_from=received_from,
+                received_to=received_to, replayed=replayed, limit=limit, cursor=cursor,
+            )
+            return store.query_requests(query)
+        except ValueError as exc:
+            return JSONResponse(status_code=422, content={"error": str(exc)})
+
+    @app.get("/api/audit")
+    async def audit_events(
+        limit: int = 100,
+        action: str | None = None,
+        actor: str | None = None,
+    ):
+        return _get_or_create_storage().list_audit_events(limit, action, actor)
 
     return app
 

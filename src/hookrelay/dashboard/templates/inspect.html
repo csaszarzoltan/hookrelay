@@ -94,7 +94,7 @@
 
         {% if delivery_attempts %}
         <section class="delivery-timeline">
-            <h2>Delivery and response details</h2>
+            <h2>Delivery timeline — Response details</h2>
             {% for attempt in delivery_attempts %}
             <article class="delivery-attempt">
                 <h3>{{ attempt.status|replace('_', ' ')|title }}{% if attempt.response_status is not none %} · HTTP {{ attempt.response_status }}{% endif %}</h3>

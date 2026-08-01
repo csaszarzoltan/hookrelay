@@ -160,3 +160,166 @@ Seven acceptance tests were written first and confirmed failing. They cover loca
 - TLS automation and trusted-proxy configuration.
 - Schema and routing-rule management UI.
 - Request comparison and saved replay variants.
+
+---
+
+# Hookrelay 0.9.1 Reliability and Workflow Restoration
+
+## 1. Product understanding
+
+Hookrelay is a local-first webhook relay and debugging workspace for backend developers, integration engineers, and QA users. Its most frequent workflow is receive, find, inspect, fix, and replay. The reviewed 0.9.0 artifact contained strong storage, validation, delivery, retention, and authentication foundations, but 13 committed acceptance tests failed across the highest-frequency dashboard workflows.
+
+### Confirmed findings that drove this release
+
+- Live updates reloaded the whole page and reconnect did not restore handlers.
+- Connection state and readiness API were missing.
+- History lacked the required path/search/saved-view workflow.
+- Replay used `default` instead of the request's stored channel.
+- No-client replay failures escaped as exceptions.
+- Sensitive request headers were rendered without masking.
+- Request deletion and delivery-attempt APIs were absent.
+- Delivery timeline expectations were inconsistent with the packaged UI.
+
+## 2. Improvement summary
+
+### Critical improvements implemented
+
+- Incremental live rows with no document reload.
+- Connected/reconnecting/disconnected state and exponential-backoff reconnect.
+- Pause/resume with buffered-event count.
+- Full-text History search and combinable channel, method, path, and validation filters.
+- Persistent query state and named saved views.
+- Stored-channel replay and typed 409 no-client feedback.
+- Case-insensitive sensitive request-header redaction.
+- Request deletion and delivery-attempt APIs.
+- Shared relay manager and process-wide live dashboard manager.
+- Dashboard status API and restored delivery timeline.
+
+### Secondary improvements implemented
+
+- Accessible live status region and pause state.
+- Labeled History controls and responsive request tables.
+- Better empty-state copy and descriptive validation state.
+- Saved-view create/apply/delete interactions.
+- Bounded Live Feed rendering to 50 rows.
+
+### Opportunities not implemented yet
+
+- Split-pane request workspace.
+- JSON tree and request comparison.
+- Schema and routing management UI.
+- Per-user identities, roles, and audit.
+- Retention impact preview and sanitized diagnostic export.
+
+## 3. Requirements implemented
+
+### Must have
+
+- **BR-01:** Align claims, implementation, and acceptance tests.
+- **UR-02:** Monitor requests without losing context.
+- **UR-03:** Find a request using full-text search and filters.
+- **UR-05:** Replay with the stored channel and actionable outcomes.
+- **FR-01:** Render live events incrementally.
+- **FR-02:** Expose and recover live connection state.
+- **FR-04:** Provide a usable request query workflow.
+- **FR-05:** Persist named request views.
+- **FR-06:** Correct replay behavior.
+- **FR-07:** Redact sensitive request headers.
+- **FR-08:** Expose delivery-attempt data consistently.
+- **FR-09:** Delete requests and related diagnostic records safely.
+- **NFR-01:** Require a green regression suite and package smoke test.
+
+### Should have
+
+- Accessible live feedback, filter labels, resilient responsive tables, and saved-view controls.
+
+## 4. Implementation details
+
+### Changed modules
+
+- `dashboard/__init__.py`: query workflow, redaction, replay errors, saved-view APIs, deletion API, delivery API, status API, shared managers.
+- `dashboard/static/dashboard.js`: incremental live state machine, pause buffering, reconnect, replay feedback, and saved-view actions.
+- `dashboard/static/style.css`: status, focus, saved-view, and responsive styles.
+- `dashboard/templates/index.html`: stable live table, status, pause, and empty state.
+- `dashboard/templates/history.html`: search, filters, saved views, persistent pagination.
+- `dashboard/templates/inspect.html`: restored delivery timeline wording and redacted request data.
+- `storage.py`: persistent named request views.
+- `relay.py`: process-wide shared relay manager.
+- `server.py`: shared relay manager and correct live dashboard broadcast.
+
+### Architectural decisions
+
+- Retained FastAPI, Jinja2, vanilla JavaScript, SQLite, and the existing project layout.
+- Used one process-wide relay manager because the current server architecture is single-process. Multi-worker state remains future work.
+- Reused SQLite FTS5 instead of introducing a second search service.
+- Kept request originals immutable; redaction is applied to presentation paths.
+
+## 5. Testing
+
+### TDD and acceptance approach
+
+Existing failing acceptance tests from versions 0.5 through 0.7 were treated as executable requirements. The implementation was developed until all 18 targeted workflow tests passed. The complete suite was then run from a clean virtual environment.
+
+### Final results
+
+- Targeted restored workflow tests: **18 passed**
+- Full regression suite: **477 passed, 0 failed**
+- Ruff: **all application source and release-specific tests passed**
+- One existing non-failing Pydantic warning remains for `_ValidateRequest.schema`.
+
+### Remaining test gaps
+
+- Real-browser DOM and screen-reader automation.
+- Sustained burst/load testing.
+- Multi-worker connection-registry tests.
+- End-to-end TLS reverse-proxy testing.
+
+## 6. Packaging and setup
+
+The ZIP contains source, tests, configuration, all product/UX reports, and implementation notes. It excludes virtual environments, caches, bytecode, databases, and build artifacts.
+
+```bash
+python -m venv .venv
+source .venv/bin/activate
+pip install -e ".[dev]"
+pytest -q
+hookrelay serve
+```
+
+---
+
+# Hookrelay 1.0.0 Versioned Data Foundation
+
+## Product rationale
+
+The 0.9.1 release restored the core workflow. The next risk was uncontrolled data-model evolution: tables were created opportunistically, live events were transient, connection state lacked metadata, query semantics were split across surfaces, and sensitive actions had no durable audit trail. Version 1.0 establishes explicit contracts for those areas.
+
+## Implemented data requirements
+
+- Explicit database schema version and ordered migration history
+- Versioned durable event envelope with monotonic cursor
+- Metadata-rich connection sessions and heartbeat state
+- Canonical validated request query with opaque cursor pagination
+- Append-only, recursively redacted audit records
+- Protected introspection and retrieval APIs
+
+## Key files
+
+- `src/hookrelay/migrations.py`
+- `src/hookrelay/events.py`
+- `src/hookrelay/query.py`
+- `src/hookrelay/storage.py`
+- `src/hookrelay/relay.py`
+- `src/hookrelay/server.py`
+- `src/hookrelay/client.py`
+- `src/hookrelay/dashboard/static/dashboard.js`
+- `tests/test_data_foundation_v100.py`
+- `docs/data-requirements-1.0.md`
+
+## TDD result
+
+The six new acceptance tests were written before the modules existed and initially failed during test collection. The minimum data contracts were then implemented, refactored, and validated with the complete regression suite.
+
+- New data-foundation tests: **6 passed**
+- Full regression suite: **483 passed, 0 failed**
+- Ruff: source and new tests pass
