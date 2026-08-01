@@ -12,7 +12,11 @@ from fastapi.templating import Jinja2Templates
 from hookrelay import _storage
 from hookrelay.dashboard.connection_manager import ConnectionManager
 from hookrelay.relay import RelayManager
-from hookrelay.replay import RequestNotFoundError, replay_request
+from hookrelay.replay import (
+    NoConnectedClientError,
+    RequestNotFoundError,
+    replay_request,
+)
 
 # Global connection manager for live monitoring
 _live_manager = ConnectionManager()
@@ -22,6 +26,29 @@ _relay_manager = RelayManager()
 _TEMPLATES_DIR = Path(__file__).resolve().parent / "templates"
 
 templates = Jinja2Templates(directory=str(_TEMPLATES_DIR))
+
+_SENSITIVE_HEADERS = frozenset({
+    "authorization", "proxy-authorization", "cookie", "set-cookie",
+    "x-api-key", "x-auth-token", "api-key",
+})
+
+
+def get_live_manager() -> ConnectionManager:
+    """Return the process-wide dashboard connection manager."""
+    return _live_manager
+
+
+def get_relay_manager() -> RelayManager:
+    """Return the process-wide relay manager shared by server and dashboard."""
+    return _relay_manager
+
+
+def redact_headers(headers: dict[str, Any]) -> dict[str, Any]:
+    """Mask common secret-bearing headers before rendering them in HTML."""
+    return {
+        name: ("••••••••" if name.lower() in _SENSITIVE_HEADERS else value)
+        for name, value in headers.items()
+    }
 
 
 def create_dashboard_router() -> APIRouter:
@@ -53,12 +80,13 @@ def create_dashboard_router() -> APIRouter:
         limit: int = Query(20),
         offset: int = Query(0),
         validation_status: str | None = Query(None),
+        path: str | None = Query(None),
     ):
         """History browser page with filters and pagination."""
         store = _storage.get()
         if store:
             requests = store.list_requests(
-                channel=channel, limit=limit, offset=offset, method=method
+                channel=channel, limit=limit, offset=offset, method=method, path=path
             )
             total = store.count_requests(channel=channel)
             for req in requests:
@@ -72,6 +100,11 @@ def create_dashboard_router() -> APIRouter:
                         )
                 except Exception:
                     pass
+            if validation_status in {"valid", "invalid"}:
+                requests = [
+                    item for item in requests
+                    if item.get("validation_status") == validation_status
+                ]
         else:
             requests = []
             total = 0
@@ -87,6 +120,8 @@ def create_dashboard_router() -> APIRouter:
                 "limit": limit,
                 "offset": offset,
                 "validation_status": validation_status,
+                "path": path,
+                "has_next": offset + len(requests) < total,
             },
         )
 
@@ -95,6 +130,9 @@ def create_dashboard_router() -> APIRouter:
         """Payload inspector page with validation status."""
         store = _storage.get()
         detail = store.get_request(request_id) if store else None
+        if detail:
+            detail = dict(detail)
+            detail["headers"] = redact_headers(detail.get("headers", {}))
         validation_result = None
         if store and detail:
             try:
@@ -128,23 +166,48 @@ def create_dashboard_router() -> APIRouter:
                 status_code=404,
                 content={"error": f"Request {request_id} not found"},
             )
-        target = None
-        if body:
-            target = body.get("target")
+        target = body.get("target") if body else None
+        detail = store.get_request(request_id)
+        if detail is None:
+            return JSONResponse(
+                status_code=404,
+                content={"error": f"Request {request_id} not found", "code": "not_found"},
+            )
+        channel = detail.get("channel", "default")
         try:
-            replay_request(
+            result = replay_request(
                 request_id=request_id,
-                channel="default",
+                channel=channel,
                 storage=store,
                 relay_manager=_relay_manager,
                 target_url=target,
             )
-            return {"status": "ok", "request_id": request_id}
+            return {"status": "ok", "request_id": request_id, "channel": channel, **result}
+        except NoConnectedClientError as exc:
+            return JSONResponse(
+                status_code=409,
+                content={
+                    "error": str(exc),
+                    "code": "no_connected_client",
+                    "request_id": request_id,
+                    "channel": channel,
+                },
+            )
         except RequestNotFoundError:
             return JSONResponse(
                 status_code=404,
                 content={"error": f"Request {request_id} not found"},
             )
+
+
+    @router.get("/api/dashboard/status")
+    async def dashboard_status():
+        """Return lightweight monitoring and relay readiness state."""
+        return {
+            "status": "ok",
+            "dashboard_connections": _live_manager.active_connections,
+            "relay_channels": _relay_manager.channel_counts(),
+        }
 
     @router.websocket("/dashboard/ws/live")
     async def live_websocket(ws: WebSocket):

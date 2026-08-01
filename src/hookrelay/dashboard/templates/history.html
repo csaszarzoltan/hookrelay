@@ -24,10 +24,20 @@
 
         <section class="filters">
             <form method="get" action="/dashboard/history">
-                <input type="text" name="channel" placeholder="Channel" value="{{ channel or '' }}">
-                <input type="text" name="method" placeholder="Method" value="{{ method or '' }}">
-                <input type="number" name="limit" placeholder="Limit" value="{{ limit }}" min="1" max="100">
-                <button type="submit">Filter</button>
+                <label><span>Channel</span><input type="text" name="channel" placeholder="e.g. payments" value="{{ channel or '' }}"></label>
+                <label><span>Method</span><select name="method">
+                    <option value="">All methods</option>
+                    {% for item in ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'] %}<option value="{{ item }}" {% if method == item %}selected{% endif %}>{{ item }}</option>{% endfor %}
+                </select></label>
+                <label><span>Path contains</span><input type="text" name="path" placeholder="e.g. /stripe" value="{{ path or '' }}"></label>
+                <label><span>Validation</span><select name="validation_status">
+                    <option value="">All states</option>
+                    <option value="valid" {% if validation_status == 'valid' %}selected{% endif %}>Valid</option>
+                    <option value="invalid" {% if validation_status == 'invalid' %}selected{% endif %}>Invalid</option>
+                </select></label>
+                <label><span>Per page</span><input type="number" name="limit" value="{{ limit }}" min="1" max="100"></label>
+                <button type="submit">Apply filters</button>
+                <a class="btn btn-secondary" href="/dashboard/history">Clear</a>
             </form>
         </section>
 
@@ -70,9 +80,9 @@
 
             <div class="pagination">
                 {% if offset > 0 %}
-                <a href="/dashboard/history?limit={{ limit }}&offset={{ offset - limit }}">&laquo; Previous</a>
+                <a href="/dashboard/history?channel={{ channel or "" }}&method={{ method or "" }}&path={{ path or "" }}&validation_status={{ validation_status or "" }}&limit={{ limit }}&offset={{ offset - limit }}">&laquo; Previous</a>
                 {% endif %}
-                <a href="/dashboard/history?limit={{ limit }}&offset={{ offset + limit }}">Next &raquo;</a>
+                {% if has_next %}<a href="/dashboard/history?channel={{ channel or "" }}&method={{ method or "" }}&path={{ path or "" }}&validation_status={{ validation_status or "" }}&limit={{ limit }}&offset={{ offset + limit }}">Next &raquo;</a>{% endif %}
             </div>
             {% else %}
             <div class="empty-state">

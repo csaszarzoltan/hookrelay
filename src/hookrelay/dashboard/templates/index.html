@@ -18,39 +18,29 @@
     <main class="dashboard-main">
         <header class="page-header">
             <h1>Live Feed</h1>
-            <span class="badge">{{ total_count }} total requests</span>
+            <span class="badge"><span id="total-count">{{ total_count }}</span> total requests</span>
+            <span id="connection-status" class="connection-status reconnecting" role="status" aria-live="polite">Connecting…</span>
+            <button id="pause-live" class="btn btn-secondary" type="button" aria-pressed="false">Pause updates</button>
         </header>
 
         <section class="live-feed" id="live-feed">
-            {% if recent_requests %}
-            <table class="request-table">
-                <thead>
-                    <tr>
-                        <th>Time</th>
-                        <th>Method</th>
-                        <th>Channel</th>
-                        <th>Path</th>
-                        <th>Source</th>
-                        <th>ID</th>
-                    </tr>
-                </thead>
-                <tbody>
+            <table class="request-table" aria-label="Live webhook requests">
+                <thead><tr><th>Time</th><th>Method</th><th>Channel</th><th>Path</th><th>Source</th><th>ID</th></tr></thead>
+                <tbody id="live-feed-body">
                     {% for req in recent_requests %}
-                    <tr>
+                    <tr data-request-id="{{ req.request_id }}">
                         <td class="time">{{ req.received_at[-12:] if req.received_at else '' }}</td>
                         <td><span class="method method-{{ req.method|lower }}">{{ req.method }}</span></td>
-                        <td>{{ req.channel }}</td>
-                        <td>{{ req.path }}</td>
-                        <td>{{ req.source_ip }}</td>
-                        <td><a href="/dashboard/inspect/{{ req.request_id }}" class="req-link">{{ req.request_id[:12] }}</a></td>
+                        <td>{{ req.channel }}</td><td>{{ req.path }}</td><td>{{ req.source_ip }}</td>
+                        <td><a href="/dashboard/inspect/{{ req.request_id }}" class="req-link" aria-label="Inspect request {{ req.request_id }}">{{ req.request_id[:12] }}</a></td>
                     </tr>
                     {% endfor %}
                 </tbody>
             </table>
-            {% else %}
-            <div class="empty-state">
-                <p>No webhooks received yet.</p>
-                <p>Configure your webhook sender to POST to <code>/webhook/&lt;channel&gt;</code></p>
+            {% if not recent_requests %}
+            <div class="empty-state" id="live-empty-state">
+                <h2>No webhooks received yet</h2>
+                <p>Configure your sender to use <code>/webhook/&lt;channel&gt;</code>. New requests will appear here without a page refresh.</p>
             </div>
             {% endif %}
         </section>

@@ -1,6 +1,6 @@
 # hookrelay 🪝
 
-**Webhook relay tool for local development.** CLI-first ngrok alternative — forward webhooks to localhost, inspect payloads in real-time, replay historical requests, and filter by source. Now with a **Web Dashboard** for visual debugging.
+**Webhook relay tool for local development.** CLI-first ngrok alternative — forward webhooks to localhost, inspect payloads in real-time, replay historical requests, and filter by source. Now with a **Web Dashboard** for visual debugging and resilient daily workflows.
 
 [![GitHub Release](https://img.shields.io/github/v/release/csaszarzoltan/hookrelay?logo=github)](https://github.com/csaszarzoltan/hookrelay/releases)
 [![Python](https://img.shields.io/badge/python-3.11+-blue?logo=python)](https://python.org)
@@ -182,7 +182,7 @@ python -m venv .venv && source .venv/bin/activate
 pip install -e ".[dev]"
 
 # Run tests
-pytest tests/ -v
+pytest -q
 
 # Lint
 ruff check src/ tests/
@@ -191,3 +191,8 @@ ruff check src/ tests/
 ## License
 
 MIT — see [LICENSE](LICENSE) (not present; MIT applies by default per `pyproject.toml`).
+
+### Product and implementation reports
+
+- `docs/product-ux-requirements-report.md` contains the full product, UX, and requirements analysis.
+- `IMPLEMENTATION_REPORT.md` documents implemented scope, decisions, tests, assumptions, and remaining opportunities.

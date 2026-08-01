@@ -22,7 +22,7 @@
         </header>
 
         {% if detail %}
-        <section class="replay-info">
+        <section class="replay-info" aria-labelledby="replay-destination"><h2 id="replay-destination">Replay destination</h2>
             <p><strong>Channel:</strong> {{ detail.channel }}</p>
             <p><strong>Method:</strong> {{ detail.method }}</p>
             <p><strong>Path:</strong> {{ detail.path }}</p>
@@ -31,10 +31,10 @@
         <section class="replay-actions">
             <form id="replay-form" onsubmit="return replayRequest()">
                 <label for="target-url">Target URL (optional):</label>
-                <input type="text" id="target-url" placeholder="http://localhost:4000/hook">
-                <button type="submit" class="btn btn-primary">Replay</button>
+                <input type="url" id="target-url" autocomplete="off" aria-describedby="target-help" placeholder="http://localhost:4000/hook">
+                <small id="target-help">Leave empty to use the connected client on the stored channel.</small><button type="submit" class="btn btn-primary" id="replay-submit">Replay now</button>
             </form>
-            <div id="replay-result"></div>
+            <div id="replay-result" role="status" aria-live="polite"></div>
         </section>
         {% else %}
         <div class="empty-state">

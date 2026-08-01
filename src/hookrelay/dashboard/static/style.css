@@ -438,3 +438,16 @@ body {
     color: #ef4444;
     border: 1px solid rgba(239, 68, 68, 0.3);
 }
+
+/* v0.5 daily-debugging UX */
+.connection-status { padding: 4px 10px; border-radius: 999px; font-size: .85rem; font-weight: 600; }
+.connection-status.connected { color: var(--success); background: rgba(34,197,94,.12); }
+.connection-status.reconnecting { color: var(--warning); background: rgba(245,158,11,.12); }
+.connection-status.disconnected { color: var(--danger); background: rgba(239,68,68,.12); }
+.btn-secondary { background: transparent; border: 1px solid var(--border); color: var(--text-primary); }
+.filters label { display: grid; gap: 4px; color: var(--text-secondary); font-size: .78rem; }
+.filters label span { font-weight: 600; }
+.error-header { width: 100%; border: 0; background: transparent; color: inherit; text-align: left; }
+#replay-result.pending { display: block; background: rgba(59,130,246,.1); color: var(--accent); border: 1px solid rgba(59,130,246,.3); }
+button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+@media (max-width: 760px) { .request-table { display: block; overflow-x: auto; } .dashboard-main { padding: 16px; } }

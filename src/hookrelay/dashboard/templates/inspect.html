@@ -37,11 +37,11 @@
                 <h3>Errors ({{ validation_result.errors|length }})</h3>
                 {% for error in validation_result.errors %}
                 <div class="validation-error">
-                    <div class="error-header" onclick="this.parentElement.classList.toggle('expanded')">
+                    <button type="button" class="error-header" aria-expanded="false">
                         <span class="severity severity-error">error</span>
                         <span class="error-path">{{ error.path }}</span>
                         <span class="toggle-icon">▶</span>
-                    </div>
+                    </button>
                     <div class="error-body">
                         <p><strong>Message:</strong> {{ error.message }}</p>
                         {% if error.schema_path %}<p><strong>Schema Path:</strong> {{ error.schema_path }}</p>{% endif %}
@@ -57,11 +57,11 @@
                 <h3>Warnings ({{ validation_result.warnings|length }})</h3>
                 {% for warn in validation_result.warnings %}
                 <div class="validation-error">
-                    <div class="error-header" onclick="this.parentElement.classList.toggle('expanded')">
+                    <button type="button" class="error-header" aria-expanded="false">
                         <span class="severity severity-warning">warning</span>
                         <span class="error-path">{{ warn.path }}</span>
                         <span class="toggle-icon">▶</span>
-                    </div>
+                    </button>
                     <div class="error-body">
                         <p><strong>Message:</strong> {{ warn.message }}</p>
                     </div>
@@ -75,11 +75,11 @@
                 <h3>Info ({{ validation_result.infos|length }})</h3>
                 {% for info in validation_result.infos %}
                 <div class="validation-error">
-                    <div class="error-header" onclick="this.parentElement.classList.toggle('expanded')">
+                    <button type="button" class="error-header" aria-expanded="false">
                         <span class="severity severity-info">info</span>
                         <span class="error-path">{{ info.path }}</span>
                         <span class="toggle-icon">▶</span>
-                    </div>
+                    </button>
                     <div class="error-body">
                         <p><strong>Message:</strong> {{ info.message }}</p>
                     </div>

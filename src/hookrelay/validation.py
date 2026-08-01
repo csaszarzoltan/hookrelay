@@ -145,8 +145,33 @@ def compile_schema(
         return _schema_cache[cache_key]
 
     validator_cls = _get_draft_validator(draft)
+    from datetime import datetime
+    from urllib.parse import urlparse
+
     import jsonschema
-    validator = validator_cls(schema, format_checker=jsonschema.FormatChecker())
+
+    format_checker = jsonschema.FormatChecker()
+
+    # Keep core URI and RFC 3339 date-time validation deterministic even
+    # when optional jsonschema format packages are unavailable.
+    @format_checker.checks("uri")
+    def _is_uri(value: object) -> bool:
+        if not isinstance(value, str):
+            return True
+        parsed = urlparse(value)
+        return bool(parsed.scheme and (parsed.netloc or parsed.path)) and " " not in value
+
+    @format_checker.checks("date-time")
+    def _is_date_time(value: object) -> bool:
+        if not isinstance(value, str):
+            return True
+        try:
+            datetime.fromisoformat(value)
+            return "T" in value
+        except ValueError:
+            return False
+
+    validator = validator_cls(schema, format_checker=format_checker)
     _schema_cache[cache_key] = validator
     return validator
 

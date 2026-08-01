@@ -61,6 +61,10 @@ class RelayManager:
         """Check if any clients are connected on a channel."""
         return self.get_connected_clients(channel) > 0
 
+    def channel_counts(self) -> dict[str, int]:
+        """Return active client counts by channel for readiness displays."""
+        return {channel: len(clients) for channel, clients in self._channels.items()}
+
     def send_heartbeat(self, channel: str) -> None:
         """Send a heartbeat ping to all clients on a channel."""
         self.broadcast(channel, {"type": "heartbeat", "timestamp": time.time()})

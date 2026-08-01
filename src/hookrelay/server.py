@@ -5,16 +5,18 @@ from __future__ import annotations
 from fastapi import FastAPI, Request, WebSocket
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
-
 from pydantic import BaseModel
 
 from hookrelay import __version__, _storage
-from hookrelay.dashboard import create_dashboard_router
-from hookrelay.relay import RelayManager
+from hookrelay.dashboard import (
+    create_dashboard_router,
+    get_live_manager,
+    get_relay_manager,
+)
 from hookrelay.storage import Storage
 
 # Module-level shared instance (for CLI access)
-_relay_manager = RelayManager()
+_relay_manager = get_relay_manager()
 
 
 def _get_or_create_storage(db_path: str | None = None) -> Storage:
@@ -217,17 +219,21 @@ async def _handle_webhook(channel: str, request: Request):
     except Exception:
         pass
 
-    # Broadcast via WebSocket
+    # Broadcast a complete, JSON-safe summary to connected dashboards.
     try:
-        from hookrelay.dashboard.connection_manager import ConnectionManager
-        live_mgr = ConnectionManager()
-        import asyncio
-        asyncio.ensure_future(live_mgr.broadcast({
+        await get_live_manager().broadcast({
             "type": "webhook",
-            "channel": channel,
-            "request_id": request_id,
-        }))
+            "data": {
+                "request_id": request_id,
+                "channel": channel,
+                "method": method,
+                "path": result.get("path", "/"),
+                "source_ip": source_ip,
+                "received_at": result.get("received_at", ""),
+            },
+        })
     except Exception:
+        # Dashboard delivery must never block webhook ingestion.
         pass
 
     return JSONResponse(

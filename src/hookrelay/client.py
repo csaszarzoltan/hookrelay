@@ -45,6 +45,11 @@ class WebSocketClient:
 
         Returns the response dict with status, headers, body.
         """
+        from urllib.parse import urlparse
+        hostname = (urlparse(self.target_url).hostname or "").lower()
+        if hostname.endswith(".invalid") or hostname == "invalid":
+            raise ValueError("Reserved .invalid target cannot be forwarded")
+
         method = request_data.get("method", "POST").upper()
         headers = request_data.get("headers", {})
         body = request_data.get("body")
