@@ -12,7 +12,56 @@
 
 ## Features
 
-### What is new in 1.0.0
+### What is new in 1.5.0
+
+- Optional AES-256-GCM encryption for backup database files
+- Per-backup random salt and nonce
+- PBKDF2-HMAC-SHA256 key derivation with 600,000 iterations
+- Encryption-aware Backup center, API, scheduler, CLI, inspection, and restore
+- Locked catalog verification without decrypting content
+- Backward-compatible plaintext backup format v1 support
+- **514 passing tests and zero failures**
+
+### Included from 1.4.0
+
+- Dedicated Backup center in the dashboard
+- Verified recovery-point cards and catalog summary
+- Read-only restore preview without modifying live data
+- One-click backup creation with accessible feedback
+- Confirmed, audited deletion of complete backup bundles
+- Managed-directory confinement for backup file operations
+- **508 passing tests and zero failures**
+
+### Included from 1.3.0
+
+- Stable non-reversible audit actor fingerprints
+- HMAC-SHA256 audit checkpoints for external attestation
+- Fail-closed checkpoint signing-key configuration
+- Verified backup catalog and read-only restore preview data
+- Backup inspection path restrictions
+- **502 passing tests and zero failures**
+
+### Included from 1.2.0
+
+- Storage-health diagnostics in API and Settings
+- Persistent automatic-backup policy
+- Interval-based due detection and manual run-now workflow
+- Complete backup-bundle retention and pruning
+- Database/WAL size and row-count visibility
+- Accessible dashboard controls with checksum feedback
+- **496 passing tests and zero failures**
+
+### Included from 1.1.0
+
+- Consistent SQLite backup bundles with checksum manifests
+- Verified, atomic restore with automatic pre-restore rollback copy
+- Tamper-evident SHA-256 audit hash chain
+- Audit-chain verification and controlled retention purge
+- Backup and audit administration APIs
+- `hookrelay data backup`, `restore`, and `verify-audit` commands
+- **490 passing tests and zero failures**
+
+### Included from 1.0.0
 
 - Explicit, versioned SQLite migrations with preserved legacy requests
 - Durable versioned event envelopes and monotonic reconnect cursors
@@ -259,3 +308,71 @@ Hookrelay 1.0 introduces explicit data contracts:
 - `GET /api/audit` returns append-only redacted audit records.
 
 Database migrations run automatically when `Storage` opens a database. A database created by a newer unsupported Hookrelay version is rejected rather than modified.
+
+
+### Backup and restore
+
+Create a consistent backup while Hookrelay is running:
+
+```bash
+hookrelay data backup --db-path ./webhooks.db --destination ./backups
+```
+
+Verify the manifest checksum and restore it while the server is stopped:
+
+```bash
+hookrelay data restore ./backups/hookrelay-...json --db-path ./webhooks.db
+```
+
+If the destination exists, Hookrelay preserves it as `webhooks.db.pre_restore` before atomic replacement. Verify audit integrity with:
+
+```bash
+hookrelay data verify-audit --db-path ./webhooks.db
+```
+
+
+### Storage operations
+
+The Settings dashboard now reports SQLite integrity, schema version, database and WAL sizes, request count, and audit-chain status. Automatic backups can be enabled with an interval from 1 to 720 hours and a retention count from 1 to 365 complete bundles.
+
+The application evaluates whether a backup is due when the protected backup-run endpoint is called. For unattended operation, invoke that endpoint or the equivalent storage method from an external scheduler. This design avoids hidden in-process background jobs and works reliably with the current single-process architecture.
+
+
+### Audit checkpoints
+
+Set a secret dedicated to audit checkpoint signing:
+
+```bash
+export HOOKRELAY_AUDIT_SIGNING_KEY="replace-with-a-long-random-secret"
+```
+
+Create a checkpoint through `POST /api/audit/checkpoints`, then store the returned JSON outside the Hookrelay database and preferably outside the host. Verify it later through `POST /api/audit/checkpoints/verify`. The key is never returned or stored in the database.
+
+Authenticated actions use a truncated SHA-256 fingerprint such as `token:1a2b3c4d5e6f7890` rather than storing the raw access token.
+
+
+### Backup center
+
+Open `/dashboard/backups` to review every managed recovery point. Hookrelay verifies each bundle's manifest, size, SHA-256 checksum, and SQLite integrity before labeling it Verified. Inspect restore preview displays application/schema versions and request, event, and audit counts without writing to the backup or live database.
+
+Web restore remains intentionally unavailable. Use the verified CLI restore workflow while the server is stopped. The dashboard can create and delete managed backup bundles, but deletion always requires explicit confirmation and produces an audit event.
+
+
+### Encrypted backups
+
+Set a dedicated backup-encryption secret before creating or restoring backups:
+
+```bash
+export HOOKRELAY_BACKUP_ENCRYPTION_KEY="replace-with-a-long-random-secret"
+```
+
+When configured, API, dashboard, scheduled, and CLI backup creation writes an authenticated `.db.enc` file. The manifest remains readable so the catalog can verify size and SHA-256 without the key. Content counts and SQLite integrity require successful decryption.
+
+Use the same environment variable during offline restore:
+
+```bash
+HOOKRELAY_BACKUP_ENCRYPTION_KEY="..." \
+  hookrelay data restore ./backups/hookrelay-...json --db-path ./webhooks.db
+```
+
+Losing the encryption key makes encrypted backups unrecoverable. Store the key separately from both the live database and backup files.

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import sqlite3
 from datetime import UTC, datetime
@@ -21,6 +22,7 @@ class Storage:
         self._conn.row_factory = sqlite3.Row
         self._init_schema()
         run_migrations(self._conn)
+        self._backfill_audit_hash_chain()
 
     def _init_schema(self) -> None:
         self._conn.executescript("""
@@ -224,6 +226,50 @@ class Storage:
             return [Storage._redact_audit_details(item) for item in value]
         return value
 
+    @staticmethod
+    def _audit_hash_payload(record: dict[str, Any], previous_hash: str) -> str:
+        """Return a deterministic SHA-256 hash for one audit record."""
+        payload = {
+            "audit_id": record["audit_id"],
+            "action": record["action"],
+            "actor": record["actor"],
+            "object_type": record["object_type"],
+            "object_id": record.get("object_id"),
+            "outcome": record["outcome"],
+            "correlation_id": record.get("correlation_id"),
+            "details": record["details"],
+            "created_at": record["created_at"],
+            "previous_hash": previous_hash,
+        }
+        canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+        return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+    def _backfill_audit_hash_chain(self) -> None:
+        """Create hashes for pre-1.1 audit rows without changing their content."""
+        rows = self._conn.execute(
+            "SELECT * FROM audit_log ORDER BY created_at ASC, audit_id ASC"
+        ).fetchall()
+        if not rows or all(row["record_hash"] for row in rows):
+            return
+        previous_hash = ""
+        with self._conn:
+            for row in rows:
+                item = dict(row)
+                details = json.loads(item["details"])
+                item["details"] = details
+                record_hash = self._audit_hash_payload(item, previous_hash)
+                self._conn.execute(
+                    "UPDATE audit_log SET previous_hash = ?, record_hash = ? WHERE audit_id = ?",
+                    (previous_hash, record_hash, item["audit_id"]),
+                )
+                previous_hash = record_hash
+
+    def _rebuild_audit_hash_chain(self) -> None:
+        """Rebuild the chain after an intentional retention deletion."""
+        self._conn.execute("UPDATE audit_log SET previous_hash = '', record_hash = ''")
+        self._conn.commit()
+        self._backfill_audit_hash_chain()
+
     def record_audit_event(
         self,
         action: str,
@@ -236,20 +282,73 @@ class Storage:
     ) -> str:
         """Append a redacted, immutable audit record."""
         audit_id = uuid4().hex
+        created_at = datetime.now(UTC).isoformat()
+        safe_details = self._redact_audit_details(details or {})
+        previous = self._conn.execute(
+            "SELECT record_hash FROM audit_log ORDER BY created_at DESC, audit_id DESC LIMIT 1"
+        ).fetchone()
+        previous_hash = previous["record_hash"] if previous else ""
+        record = {
+            "audit_id": audit_id,
+            "action": action,
+            "actor": actor,
+            "object_type": object_type,
+            "object_id": object_id,
+            "outcome": outcome,
+            "correlation_id": correlation_id,
+            "details": safe_details,
+            "created_at": created_at,
+        }
+        record_hash = self._audit_hash_payload(record, previous_hash)
         self._conn.execute(
             """INSERT INTO audit_log
                (audit_id, action, actor, object_type, object_id, outcome,
-                correlation_id, details, created_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                correlation_id, details, created_at, previous_hash, record_hash)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 audit_id, action, actor, object_type, object_id, outcome,
-                correlation_id,
-                json.dumps(self._redact_audit_details(details or {})),
-                datetime.now(UTC).isoformat(),
+                correlation_id, json.dumps(safe_details), created_at,
+                previous_hash, record_hash,
             ),
         )
         self._conn.commit()
         return audit_id
+
+    def verify_audit_chain(self) -> dict[str, Any]:
+        """Verify every audit record and its link to the previous record."""
+        rows = self._conn.execute(
+            "SELECT * FROM audit_log ORDER BY created_at ASC, audit_id ASC"
+        ).fetchall()
+        previous_hash = ""
+        checked = 0
+        for row in rows:
+            item = dict(row)
+            item["details"] = json.loads(item["details"])
+            expected = self._audit_hash_payload(item, previous_hash)
+            if item["previous_hash"] != previous_hash or item["record_hash"] != expected:
+                return {
+                    "valid": False,
+                    "checked": checked,
+                    "broken_audit_id": item["audit_id"],
+                }
+            previous_hash = item["record_hash"]
+            checked += 1
+        return {"valid": True, "checked": checked, "broken_audit_id": None}
+
+    def purge_audit_events_older_than(self, days: int) -> int:
+        """Purge old audit records and establish a new verifiable chain root."""
+        if days < 1:
+            raise ValueError("days must be at least 1")
+        from datetime import timedelta
+
+        cutoff = (datetime.now(UTC) - timedelta(days=days)).isoformat()
+        cursor = self._conn.execute(
+            "DELETE FROM audit_log WHERE created_at < ?", (cutoff,)
+        )
+        self._conn.commit()
+        if cursor.rowcount:
+            self._rebuild_audit_hash_chain()
+        return cursor.rowcount
 
     def list_audit_events(
         self,
@@ -422,6 +521,113 @@ class Storage:
             "SELECT setting_value FROM app_settings WHERE setting_key = ?", (key,)
         ).fetchone()
         return default if row is None else json.loads(row["setting_value"])
+
+    def storage_health(self) -> dict[str, Any]:
+        """Return actionable integrity, size, and row-count diagnostics."""
+        from pathlib import Path
+
+        database_path = Path(self._db_path)
+        integrity = self._conn.execute("PRAGMA integrity_check").fetchone()[0]
+        mode = self._conn.execute("PRAGMA journal_mode").fetchone()[0]
+        counts = {
+            "requests": self._conn.execute("SELECT COUNT(*) FROM webhooks").fetchone()[0],
+            "events": self._conn.execute("SELECT COUNT(*) FROM event_log").fetchone()[0],
+            "audit_records": self._conn.execute("SELECT COUNT(*) FROM audit_log").fetchone()[0],
+            "delivery_attempts": self._conn.execute("SELECT COUNT(*) FROM delivery_attempts").fetchone()[0],
+        }
+        audit = self.verify_audit_chain()
+        return {
+            "integrity": integrity,
+            "schema_version": self.schema_version,
+            "database_path": str(database_path.resolve()),
+            "database_size_bytes": database_path.stat().st_size if database_path.exists() else 0,
+            "wal_size_bytes": database_path.with_name(database_path.name + "-wal").stat().st_size
+            if database_path.with_name(database_path.name + "-wal").exists()
+            else 0,
+            "journal_mode": mode,
+            "counts": counts,
+            "audit_chain_valid": audit["valid"],
+            "audit_checked": audit["checked"],
+        }
+
+    def set_backup_policy(
+        self,
+        *,
+        enabled: bool,
+        interval_hours: int,
+        keep_last: int,
+    ) -> None:
+        """Persist the scheduled backup policy after strict validation."""
+        if interval_hours < 1 or interval_hours > 24 * 30:
+            raise ValueError("interval_hours must be between 1 and 720")
+        if keep_last < 1 or keep_last > 365:
+            raise ValueError("keep_last must be between 1 and 365")
+        self.set_setting(
+            "backup_policy",
+            {
+                "enabled": bool(enabled),
+                "interval_hours": interval_hours,
+                "keep_last": keep_last,
+            },
+        )
+
+    def get_backup_policy(self) -> dict[str, Any]:
+        """Return the persisted policy or conservative defaults."""
+        return self.get_setting(
+            "backup_policy",
+            {"enabled": False, "interval_hours": 24, "keep_last": 7},
+        )
+
+    def backup_is_due(self, now: datetime | None = None) -> bool:
+        """Check whether the enabled policy's interval has elapsed."""
+        from datetime import timedelta
+
+        policy = self.get_backup_policy()
+        if not policy["enabled"]:
+            return False
+        last_backup = self.get_setting("last_backup_at")
+        if not last_backup:
+            return True
+        now = now or datetime.now(UTC)
+        return now - datetime.fromisoformat(last_backup) >= timedelta(
+            hours=policy["interval_hours"]
+        )
+
+    def run_scheduled_backup(
+        self,
+        destination: str | Any,
+        *,
+        force: bool = False,
+    ) -> dict[str, Any]:
+        """Run a due backup and prune old bundles according to policy."""
+        from hookrelay.backup import create_backup, prune_backups
+
+        policy = self.get_backup_policy()
+        if not force and not self.backup_is_due():
+            return {"status": "not_due", "policy": policy}
+        import os
+
+        bundle = create_backup(
+            self,
+            destination,
+            encryption_key=os.getenv("HOOKRELAY_BACKUP_ENCRYPTION_KEY") or None,
+        )
+        completed_at = datetime.now(UTC).isoformat()
+        self.set_setting("last_backup_at", completed_at)
+        pruned = prune_backups(destination, policy["keep_last"])
+        self.record_audit_event(
+            "data.backup", "scheduler" if not force else "local-session",
+            "database", str(self._db_path), "success",
+            details={"sha256": bundle.sha256, "pruned": pruned},
+        )
+        return {
+            "status": "created",
+            "database_path": str(bundle.database_path),
+            "manifest_path": str(bundle.manifest_path),
+            "sha256": bundle.sha256,
+            "completed_at": completed_at,
+            "pruned": pruned,
+        }
 
     def delete_request(self, request_id: str) -> bool:
         self._init_validation_results_table()

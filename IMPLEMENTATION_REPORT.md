@@ -323,3 +323,189 @@ The six new acceptance tests were written before the modules existed and initial
 - New data-foundation tests: **6 passed**
 - Full regression suite: **483 passed, 0 failed**
 - Ruff: source and new tests pass
+
+---
+
+# Hookrelay 1.1.0 Data Resilience
+
+## Product rationale
+
+Version 1.0 established versioned data contracts. The next operational risk was recoverability and evidence integrity. Version 1.1 adds consistent backup/restore workflows and tamper-evident audit chaining without replacing the existing architecture.
+
+## Implemented requirements
+
+- Consistent SQLite backup snapshot
+- Versioned checksum manifest
+- Verified atomic restore and rollback copy
+- Audit SHA-256 chain and verification
+- Legacy audit hash backfill
+- Audit retention with intentional chain rebuilding
+- Backup, restore, and verification CLI
+- Protected administration APIs
+
+## Changed files
+
+- `src/hookrelay/backup.py`
+- `src/hookrelay/migrations.py`
+- `src/hookrelay/storage.py`
+- `src/hookrelay/server.py`
+- `src/hookrelay/cli.py`
+- `tests/test_data_resilience_v110.py`
+- `docs/data-resilience-1.1.md`
+- `docs/cli-reference.md`
+- `README.md`
+- `CHANGELOG.md`
+
+## Validation
+
+- New data-resilience tests: **7 passed**
+- Full regression: **490 passed, 0 failed**
+- Ruff: source and release-specific tests pass
+- One pre-existing non-failing Pydantic warning remains for `_ValidateRequest.schema`.
+
+---
+
+# Hookrelay 1.2.0 Storage Operations
+
+## Product rationale
+
+Versions 1.0 and 1.1 established versioned data, backup, restore, and audit integrity. The next usability gap was operational visibility: users could create backups, but could not see storage health, persist a backup schedule, or automatically prune complete bundles. Version 1.2 turns these capabilities into a coherent Settings workflow and protected API contract.
+
+## Implemented requirements
+
+- Storage health report
+- Persistent backup policy
+- Due-state calculation
+- Forced or due-only backup execution
+- Complete-bundle retention pruning
+- Health and policy APIs
+- Accessible Settings controls and feedback
+
+## Key changes
+
+- `backup.py`: complete-bundle pruning
+- `storage.py`: health, policy, due detection, scheduled execution
+- `server.py`: health and policy APIs
+- `dashboard/__init__.py`: Settings context
+- `settings.html`, `dashboard.js`, `style.css`: operator workflow
+- `tests/test_data_operations_v120.py`: six TDD-first acceptance tests
+
+## Architecture decision
+
+Scheduling persistence and due evaluation are built in, but execution remains externally triggered. This avoids duplicate hidden jobs in reload or multi-worker environments and keeps the single-process server deterministic.
+
+## Validation
+
+- New tests: **6 passed**
+- Full regression: **496 passed, 0 failed**
+- Ruff: source and release-specific tests pass
+
+---
+
+# Hookrelay 1.3.0 Data Governance
+
+## Product rationale
+
+Version 1.2 made storage operations visible. The next data-governance gaps were actor attribution, independent audit evidence, and safe backup discovery. Version 1.3 adds pseudonymous token actors, HMAC-signed chain-head checkpoints, and verified backup catalog APIs.
+
+## Implemented requirements
+
+- Stable non-reversible actor fingerprints
+- Actor-aware retention, backup, replay, and deletion audit records
+- HMAC-SHA256 audit checkpoints
+- Historical checkpoint verification after later appends
+- Verified backup catalog and inspection
+- Backup manifest path confinement
+
+## Key files
+
+- `src/hookrelay/audit.py`
+- `src/hookrelay/auth.py`
+- `src/hookrelay/backup.py`
+- `src/hookrelay/server.py`
+- `src/hookrelay/dashboard/__init__.py`
+- `tests/test_data_governance_v130.py`
+- `docs/data-governance-1.3.md`
+
+## Security decisions
+
+The raw API token and audit signing key are never persisted. Actor fingerprints are pseudonyms, not user identities. HMAC checkpoints provide useful evidence only when checkpoint JSON and the signing key are protected independently from the database.
+
+## Validation
+
+- New tests: **6 passed**
+- Full regression: **502 passed, 0 failed**
+- Ruff: source and release-specific tests pass
+
+---
+
+# Hookrelay 1.4.0 Backup Center
+
+## Product rationale
+
+The previous releases provided robust backup primitives but required operators to use APIs or Settings controls without a recovery-point catalog. Version 1.4 adds a dedicated Backup center optimized for repeated inspection, confidence, and safe cleanup. Online restore remains excluded because replacing the active SQLite database from the serving process would create avoidable corruption and availability risk.
+
+## Implemented requirements
+
+- Backup navigation and dedicated dashboard page
+- Verified bundle summary and cards
+- Actionable no-backup state
+- Inline read-only restore preview
+- Confirmed, audited bundle deletion
+- Managed-directory path confinement
+
+## Key files
+
+- `dashboard/templates/backups.html`
+- `dashboard/__init__.py`
+- `dashboard/static/dashboard.js`
+- `dashboard/static/style.css`
+- `server.py`
+- `tests/test_backup_center_v140.py`
+- `docs/backup-center-1.4.md`
+
+## Validation
+
+- New Backup center tests: **6 passed**
+- Targeted dashboard and Backup center tests: **12 passed**
+- Full regression: **508 passed, 0 failed**
+- Ruff: source and release-specific tests pass
+
+---
+
+# Hookrelay 1.5.0 Encrypted Backups
+
+## Product rationale
+
+Backup files contain the same sensitive webhook and diagnostic data as the live database. Version 1.5 adds authenticated encryption at rest while preserving the existing verified manifest, retention, inspection, and restore workflows.
+
+## Implemented requirements
+
+- AES-256-GCM backup encryption
+- PBKDF2-HMAC-SHA256 key derivation
+- Random per-backup salt and nonce
+- Authenticated backup ID
+- Encrypted format-v2 manifest
+- Encryption-aware API, scheduler, CLI, catalog, inspection, and restore
+- Plaintext format-v1 compatibility
+
+## Key files
+
+- `pyproject.toml`
+- `src/hookrelay/backup.py`
+- `src/hookrelay/storage.py`
+- `src/hookrelay/server.py`
+- `src/hookrelay/cli.py`
+- `dashboard/templates/backups.html`
+- `tests/test_encrypted_backups_v150.py`
+- `docs/encrypted-backups-1.5.md`
+
+## Security decisions
+
+The manifest remains plaintext for operational discovery. The database bytes are encrypted and authenticated. Wrong keys fail with AES-GCM authentication errors before destination replacement. Temporary plaintext is deleted in `finally` paths. Hookrelay never persists the environment encryption secret.
+
+## Validation
+
+- New encrypted-backup tests: **6 passed**
+- Full regression: **514 passed, 0 failed**
+- Ruff: source and release-specific tests pass

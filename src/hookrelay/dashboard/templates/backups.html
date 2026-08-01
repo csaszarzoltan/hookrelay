@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Backup center — Hookrelay</title>
+    <link rel="stylesheet" href="/dashboard/static/style.css">
+</head>
+<body>
+<nav class="dashboard-nav"><div class="nav-brand">Hookrelay</div><div class="nav-links"><a href="/dashboard/">Live Feed</a><a href="/dashboard/history">History</a><a href="/dashboard/backups" class="active">Backups</a><a href="/dashboard/settings">Settings</a>{% if auth_enabled() %}<form method="post" action="/dashboard/logout" class="nav-logout"><button type="submit">Sign out</button></form>{% endif %}</div></nav>
+<main class="dashboard-main">
+<header class="page-header"><div><h1>Backup center</h1><p>Verify recovery points before you need them.</p></div><button id="create-first-backup" class="btn btn-primary" type="button">Create backup</button></header>
+<section class="backup-summary" aria-label="Backup summary"><div><strong>{{ summary.total }}</strong><span>Total bundles</span></div><div><strong>{{ summary.valid }}</strong><span>Verified</span></div><div><strong>{{ summary.invalid }}</strong><span>Needs attention</span></div><div><strong>{{ summary.total_size_bytes }}</strong><span>Total bytes</span></div></section>
+<div id="backup-center-result" role="status" aria-live="polite"></div>
+{% if backups %}
+<section class="backup-list" aria-label="Backup bundles">
+{% for item in backups %}
+<article class="backup-card {% if not item.valid %}invalid{% endif %}" data-manifest-path="{{ item.manifest_path }}">
+<div class="backup-card-header"><div><h2>{{ item.backup_id or item.manifest_path.split('/')[-1] }}</h2><p>{{ item.created_at or 'Unknown creation time' }}</p></div>{% if item.valid %}<span class="security-state protected">Verified</span>{% else %}<span class="security-state open">Needs attention</span>{% endif %}</div>
+{% if item.encrypted %}<p class="backup-encryption"><strong>Encrypted</strong> · Key required for content preview</p>{% endif %}
+<dl class="health-grid"><div><dt>Application</dt><dd>{{ item.application_version or 'Unknown' }}</dd></div><div><dt>Schema</dt><dd>v{{ item.schema_version or '?' }}</dd></div><div><dt>Size</dt><dd>{{ item.database_size_bytes or 0 }} bytes</dd></div><div><dt>Contents</dt><dd>{{ item.counts.requests or 0 }} request{% if item.counts.requests != 1 %}s{% endif %}</dd></div><div><dt>SQLite</dt><dd>{{ item.integrity or 'Not checked' }}</dd></div><div><dt>Checksum</dt><dd>{{ 'Valid' if item.checksum_valid else 'Invalid' }}</dd></div></dl>
+<div class="settings-actions"><button type="button" class="btn btn-secondary" data-action="inspect-backup">Inspect restore preview</button><button type="button" class="btn btn-danger" data-action="delete-backup">Delete bundle</button></div>
+<pre class="backup-preview" hidden></pre>
+</article>
+{% endfor %}
+</section>
+{% else %}
+<section class="empty-state"><h2>No backup bundles yet</h2><p>Create a verified recovery point now, then inspect it here before relying on it.</p></section>
+{% endif %}
+</main>
+<script src="/dashboard/static/dashboard.js"></script>
+</body>
+</html>

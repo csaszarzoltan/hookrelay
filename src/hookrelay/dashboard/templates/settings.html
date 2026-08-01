@@ -12,7 +12,7 @@
         <div class="nav-links">
             <a href="/dashboard/">Live Feed</a>
             <a href="/dashboard/history">History</a>
-            <a href="/dashboard/settings" class="active">Settings</a>
+            <a href="/dashboard/backups">Backups</a><a href="/dashboard/settings" class="active">Settings</a>
             {% if auth_enabled() %}<form method="post" action="/dashboard/logout" class="nav-logout"><button type="submit">Sign out</button></form>{% endif %}
         </div>
     </nav>
@@ -29,6 +29,35 @@
             </div>
             <div id="retention-result" role="status" aria-live="polite"></div>
         </section>
+        <section class="settings-card" aria-labelledby="storage-heading" id="storage-health">
+            <h2 id="storage-heading">Storage health</h2>
+            {% if storage_health %}
+            <dl class="health-grid">
+                <div><dt>Integrity</dt><dd>{{ storage_health.integrity }}</dd></div>
+                <div><dt>Schema</dt><dd>v{{ storage_health.schema_version }}</dd></div>
+                <div><dt>Database size</dt><dd>{{ storage_health.database_size_bytes }} bytes</dd></div>
+                <div><dt>WAL size</dt><dd>{{ storage_health.wal_size_bytes }} bytes</dd></div>
+                <div><dt>Requests</dt><dd>{{ storage_health.counts.requests }}</dd></div>
+                <div><dt>Audit chain</dt><dd>{{ 'Valid' if storage_health.audit_chain_valid else 'Needs attention' }}</dd></div>
+            </dl>
+            {% else %}<p>Storage is unavailable.</p>{% endif %}
+        </section>
+        <section class="settings-card" aria-labelledby="backup-heading">
+            <h2 id="backup-heading">Automatic backups</h2>
+            <p>Create verified backup bundles at a regular interval and keep only the newest complete bundles.</p>
+            <label class="checkbox-label"><input id="backup-enabled" type="checkbox" {% if backup_policy.enabled %}checked{% endif %}> Enable scheduled backups</label>
+            <label for="backup-interval">Interval in hours</label>
+            <input id="backup-interval" type="number" min="1" max="720" value="{{ backup_policy.interval_hours }}">
+            <label for="backup-keep-last">Backup bundles to keep</label>
+            <input id="backup-keep-last" type="number" min="1" max="365" value="{{ backup_policy.keep_last }}">
+            <div class="settings-actions">
+                <button id="save-backup-policy" class="btn btn-primary" type="button">Save backup policy</button>
+                <button id="run-backup" class="btn btn-secondary" type="button">Run backup now</button>
+            </div>
+            <p>Last completed backup: <strong id="last-backup-at">{{ last_backup_at or 'Never' }}</strong></p>
+            <div id="backup-result" role="status" aria-live="polite"></div>
+        </section>
+
         <section class="settings-card" aria-labelledby="security-heading">
             <h2 id="security-heading">Access protection</h2>
             {% if auth_enabled() %}

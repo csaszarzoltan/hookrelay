@@ -13,9 +13,11 @@ from hookrelay import _storage
 from hookrelay.auth import (
     SESSION_COOKIE,
     configured_token,
+    request_actor,
     session_matches,
     token_matches,
 )
+from hookrelay.backup import list_backups
 from hookrelay.dashboard.connection_manager import ConnectionManager
 from hookrelay.relay import get_shared_relay_manager
 from hookrelay.replay import (
@@ -155,7 +157,9 @@ def create_dashboard_router() -> APIRouter:
         )
 
     @router.post("/api/replay/{request_id}")
-    async def api_replay(request_id: str, body: dict[str, Any] | None = None):
+    async def api_replay(
+        request: Request, request_id: str, body: dict[str, Any] | None = None
+    ):
         store = _storage.get()
         detail = store.get_request(request_id) if store else None
         if detail is None:
@@ -168,14 +172,14 @@ def create_dashboard_router() -> APIRouter:
                 relay_manager=_relay_manager, target_url=target,
             )
             store.record_audit_event(
-                "request.replay", "local-session", "request", request_id,
+                "request.replay", request_actor(request), "request", request_id,
                 "success", correlation_id=request_id,
                 details={"channel": channel, "target_override": bool(target)},
             )
             return {"status": "ok", "request_id": request_id, "channel": channel, **result}
         except NoConnectedClientError as exc:
             store.record_audit_event(
-                "request.replay", "local-session", "request", request_id,
+                "request.replay", request_actor(request), "request", request_id,
                 "failure", correlation_id=request_id,
                 details={"channel": channel, "error_code": "no_connected_client"},
             )
@@ -204,14 +208,16 @@ def create_dashboard_router() -> APIRouter:
         return store.list_delivery_attempts(request_id)
 
     @router.delete("/api/requests/{request_id}", status_code=204)
-    async def delete_request(request_id: str, confirm: bool = Query(False)):
+    async def delete_request(
+        request: Request, request_id: str, confirm: bool = Query(False)
+    ):
         if not confirm:
             return JSONResponse(status_code=400, content={"error": "Set confirm=true to delete this request."})
         store = _storage.get()
         if store is None or store.get_request(request_id) is None:
             return JSONResponse(status_code=404, content={"error": f"Request {request_id} not found"})
         store.record_audit_event(
-            "request.delete", "local-session", "request", request_id, "success"
+            "request.delete", request_actor(request), "request", request_id, "success"
         )
         store.delete_request(request_id)
         return HTMLResponse(status_code=204)
@@ -239,11 +245,43 @@ def create_dashboard_router() -> APIRouter:
             return JSONResponse(status_code=404, content={"error": "Saved view not found"})
         return HTMLResponse(status_code=204)
 
+    @router.get("/dashboard/backups", response_class=HTMLResponse)
+    async def dashboard_backups(request: Request):
+        store = _storage.get()
+        if store:
+            backup_dir = Path(store._db_path).resolve().parent / "backups"
+            backups = list_backups(backup_dir)
+        else:
+            backups = []
+        summary = {
+            "total": len(backups),
+            "valid": sum(1 for item in backups if item.get("valid")),
+            "invalid": sum(1 for item in backups if not item.get("valid")),
+            "total_size_bytes": sum(int(item.get("database_size_bytes", 0)) for item in backups),
+        }
+        return templates.TemplateResponse(
+            request, "backups.html", {"backups": backups, "summary": summary}
+        )
+
     @router.get("/dashboard/settings", response_class=HTMLResponse)
     async def dashboard_settings(request: Request):
         store = _storage.get()
         retention_days = store.get_setting("retention_days", 30) if store else 30
-        return templates.TemplateResponse(request, "settings.html", {"retention_days": retention_days})
+        backup_policy = store.get_backup_policy() if store else {
+            "enabled": False, "interval_hours": 24, "keep_last": 7
+        }
+        storage_health = store.storage_health() if store else None
+        last_backup_at = store.get_setting("last_backup_at") if store else None
+        return templates.TemplateResponse(
+            request,
+            "settings.html",
+            {
+                "retention_days": retention_days,
+                "backup_policy": backup_policy,
+                "storage_health": storage_health,
+                "last_backup_at": last_backup_at,
+            },
+        )
 
     @router.websocket("/dashboard/ws/live")
     async def live_websocket(ws: WebSocket):

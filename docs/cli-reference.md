@@ -142,3 +142,43 @@ hookrelay status --server https://relay.example.com
 ## Authentication environment variable
 
 `HOOKRELAY_API_TOKEN` enables access protection on the server and supplies the Bearer token for forwarding clients. It is intentionally not accepted as a command-line option, which reduces accidental disclosure through shell history and process listings.
+
+## `hookrelay data backup`
+
+Creates a consistent SQLite backup and JSON checksum manifest.
+
+```bash
+hookrelay data backup --db-path ./webhooks.db --destination ./backups
+```
+
+## `hookrelay data restore`
+
+Verifies a backup manifest, SHA-256 checksum, byte size, and SQLite integrity before atomic restore. Run while the Hookrelay server is stopped.
+
+```bash
+hookrelay data restore ./backups/hookrelay-...json --db-path ./webhooks.db
+```
+
+An existing destination is preserved as `<database>.pre_restore`.
+
+## `hookrelay data verify-audit`
+
+Verifies the complete tamper-evident audit hash chain.
+
+```bash
+hookrelay data verify-audit --db-path ./webhooks.db
+```
+
+## Audit checkpoint environment variable
+
+`HOOKRELAY_AUDIT_SIGNING_KEY` enables HMAC-SHA256 audit checkpoints. Use a long random secret that is different from `HOOKRELAY_API_TOKEN`. Store returned checkpoint JSON outside the database and ideally outside the Hookrelay host.
+
+## Encrypted backup environment variable
+
+Set `HOOKRELAY_BACKUP_ENCRYPTION_KEY` to encrypt newly created backup database files with AES-256-GCM. Set the same value during restore or content inspection. The manifest stays readable; the database file uses `.db.enc`.
+
+```bash
+export HOOKRELAY_BACKUP_ENCRYPTION_KEY="long-random-secret"
+hookrelay data backup --db-path ./webhooks.db --destination ./backups
+hookrelay data restore ./backups/hookrelay-...json --db-path ./restored.db
+```

@@ -245,3 +245,19 @@ After a forwarding client sends a webhook to the local target, it reports the ou
 - A visible truncation marker when the response exceeded the limit
 
 Open **Settings** to configure request retention. A saved policy is applied at application startup, or it can be executed immediately with **Delete expired requests now**. Cleanup removes associated validation and delivery diagnostic records.
+
+### Storage health and automatic backups (v1.2.0+)
+
+The Settings page displays database integrity, schema version, database and WAL sizes, request count, and audit-chain status. The Automatic backups section allows operators to enable a persistent policy, select an interval, choose how many complete backup bundles to retain, save the policy, and create a verified backup immediately.
+
+The policy is evaluated by the backup-run API. Use an external scheduler for unattended operation; Hookrelay intentionally avoids an implicit background scheduler in the web process.
+
+### Backup center (v1.4.0+)
+
+Use the Backups navigation item to open the recovery-point catalog. Every complete bundle is verified before display. Select **Inspect restore preview** to review schema, checksum, SQLite integrity, and record counts. **Create backup** makes a new verified bundle. **Delete bundle** requires confirmation and removes the manifest/database pair.
+
+Restore is deliberately offline. Stop the server and use `hookrelay data restore` after validating the preview.
+
+### Encrypted recovery points (v1.5.0+)
+
+When `HOOKRELAY_BACKUP_ENCRYPTION_KEY` is configured, Backup center creation produces AES-256-GCM encrypted bundles. Cards show **Encrypted**. Without the key, Hookrelay can verify the encrypted artifact checksum but labels content preview as key-required. With the key configured, Inspect restore preview securely decrypts to a temporary file, validates SQLite integrity and counts records, then deletes the temporary file.

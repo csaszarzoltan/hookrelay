@@ -6,6 +6,7 @@ import json
 import os
 import tempfile
 import urllib.request
+from pathlib import Path
 
 import typer
 
@@ -467,6 +468,78 @@ def schema_validate(
         return {"valid": result.valid, "errors": [e.__dict__ for e in result.errors]}
 
     return {"valid": True, "errors": []}
+
+
+# ============================================================
+# Data resilience commands
+# ============================================================
+
+
+data_app = typer.Typer(help="Backup, restore, and verify Hookrelay data.")
+app.add_typer(data_app, name="data")
+
+
+@data_app.command("backup")
+def data_backup(
+    db_path: str = typer.Option(..., "--db-path", help="SQLite database to back up"),
+    destination: str = typer.Option("./backups", "--destination", "-d", help="Backup directory"),
+):
+    """Create a consistent database backup and checksum manifest."""
+    from hookrelay.backup import create_backup
+
+    store = Storage(db_path)
+    try:
+        bundle = create_backup(
+            store,
+            destination,
+            encryption_key=os.getenv("HOOKRELAY_BACKUP_ENCRYPTION_KEY") or None,
+        )
+    finally:
+        store.close()
+    typer.echo(f"Manifest: {bundle.manifest_path}")
+    typer.echo(f"Database: {bundle.database_path}")
+    typer.echo(f"SHA-256: {bundle.sha256}")
+
+
+@data_app.command("restore")
+def data_restore(
+    manifest: str = typer.Argument(..., help="Backup manifest JSON path"),
+    db_path: str = typer.Option(..., "--db-path", help="Destination SQLite database"),
+):
+    """Verify and restore a backup, preserving any existing database."""
+    from hookrelay.backup import BackupIntegrityError, restore_backup
+
+    try:
+        restored = restore_backup(
+            manifest,
+            db_path,
+            encryption_key=os.getenv("HOOKRELAY_BACKUP_ENCRYPTION_KEY") or None,
+        )
+    except (BackupIntegrityError, OSError, ValueError) as exc:
+        typer.echo(f"Restore failed: {exc}", err=True)
+        raise typer.Exit(code=1) from exc
+    typer.echo(f"Restored: {restored}")
+    rollback = Path(db_path).with_suffix(Path(db_path).suffix + ".pre_restore")
+    if rollback.exists():
+        typer.echo(f"Previous database: {rollback}")
+
+
+@data_app.command("verify-audit")
+def data_verify_audit(
+    db_path: str = typer.Option(..., "--db-path", help="SQLite database to verify"),
+):
+    """Verify the tamper-evident audit hash chain."""
+    store = Storage(db_path)
+    try:
+        result = store.verify_audit_chain()
+    finally:
+        store.close()
+    if not result["valid"]:
+        typer.echo(
+            f"Audit verification failed at {result['broken_audit_id']}", err=True
+        )
+        raise typer.Exit(code=2)
+    typer.echo(f"Audit chain valid. Checked {result['checked']} records.")
 
 
 # ============================================================

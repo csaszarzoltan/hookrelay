@@ -168,4 +168,87 @@
             .then(function (response) { return response.json(); })
             .then(function (payload) { retentionResult.textContent = 'Deleted ' + payload.deleted + ' requests.'; });
     });
+    const saveBackupPolicy = document.getElementById('save-backup-policy');
+    const runBackup = document.getElementById('run-backup');
+    const backupResult = document.getElementById('backup-result');
+    if (saveBackupPolicy) saveBackupPolicy.addEventListener('click', function () {
+        const payload = {
+            enabled: document.getElementById('backup-enabled').checked,
+            interval_hours: parseInt(document.getElementById('backup-interval').value, 10),
+            keep_last: parseInt(document.getElementById('backup-keep-last').value, 10)
+        };
+        fetch('/api/data/backup-policy', {
+            method: 'PUT', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+        }).then(async function (response) {
+            const data = await response.json();
+            if (!response.ok) throw new Error(data.error || 'Could not save backup policy');
+            backupResult.textContent = 'Backup policy saved.';
+        }).catch(function (error) { backupResult.textContent = error.message; });
+    });
+    if (runBackup) runBackup.addEventListener('click', function () {
+        runBackup.disabled = true;
+        backupResult.textContent = 'Creating verified backup…';
+        fetch('/api/data/backups/run', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ force: true })
+        }).then(async function (response) {
+            const data = await response.json();
+            if (!response.ok) throw new Error(data.error || data.status || 'Backup failed');
+            backupResult.textContent = 'Backup complete. SHA-256: ' + data.sha256;
+            document.getElementById('last-backup-at').textContent = data.completed_at;
+        }).catch(function (error) {
+            backupResult.textContent = error.message;
+        }).finally(function () { runBackup.disabled = false; });
+    });
+
+    const backupCenterResult = document.getElementById('backup-center-result');
+    const createFirstBackup = document.getElementById('create-first-backup');
+    function runBackupFromCenter() {
+        if (!backupCenterResult) return;
+        backupCenterResult.textContent = 'Creating and verifying backup…';
+        fetch('/api/data/backups/run', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ force: true })
+        }).then(async function (response) {
+            const data = await response.json();
+            if (!response.ok) throw new Error(data.error || data.status || 'Backup failed');
+            backupCenterResult.textContent = 'Backup complete. Reloading catalog…';
+            window.location.assign('/dashboard/backups');
+        }).catch(function (error) { backupCenterResult.textContent = error.message; });
+    }
+    if (createFirstBackup) createFirstBackup.addEventListener('click', runBackupFromCenter);
+    document.querySelectorAll('[data-action="inspect-backup"]').forEach(function (button) {
+        button.addEventListener('click', function () {
+            const card = button.closest('.backup-card');
+            const preview = card.querySelector('.backup-preview');
+            const path = card.dataset.manifestPath;
+            button.disabled = true;
+            fetch('/api/data/backups/inspect?manifest_path=' + encodeURIComponent(path))
+                .then(async function (response) {
+                    const data = await response.json();
+                    if (!response.ok) throw new Error(data.error || 'Inspection failed');
+                    preview.textContent = JSON.stringify(data, null, 2);
+                    preview.hidden = false;
+                })
+                .catch(function (error) { backupCenterResult.textContent = error.message; })
+                .finally(function () { button.disabled = false; });
+        });
+    });
+    document.querySelectorAll('[data-action="delete-backup"]').forEach(function (button) {
+        button.addEventListener('click', function () {
+            const card = button.closest('.backup-card');
+            if (!window.confirm('Delete this backup manifest and database file?')) return;
+            button.disabled = true;
+            fetch('/api/data/backups?manifest_path=' + encodeURIComponent(card.dataset.manifestPath) + '&confirm=true', {
+                method: 'DELETE'
+            }).then(function (response) {
+                if (!response.ok) return response.json().then(function (data) { throw new Error(data.error || 'Delete failed'); });
+                card.remove();
+                backupCenterResult.textContent = 'Backup bundle deleted.';
+            }).catch(function (error) { backupCenterResult.textContent = error.message; })
+              .finally(function () { button.disabled = false; });
+        });
+    });
+
 })();

@@ -5,7 +5,7 @@ from __future__ import annotations
 import sqlite3
 from datetime import UTC, datetime
 
-CURRENT_SCHEMA_VERSION = 3
+CURRENT_SCHEMA_VERSION = 4
 
 _MIGRATIONS: dict[int, tuple[str, str]] = {
     1: (
@@ -48,6 +48,12 @@ _MIGRATIONS: dict[int, tuple[str, str]] = {
         );
         INSERT OR IGNORE INTO query_schema_metadata(schema_name, schema_version, updated_at)
         VALUES ('request_query', 1, CURRENT_TIMESTAMP);""",
+    ),
+    4: (
+        "audit-hash-chain",
+        """ALTER TABLE audit_log ADD COLUMN previous_hash TEXT NOT NULL DEFAULT '';
+        ALTER TABLE audit_log ADD COLUMN record_hash TEXT NOT NULL DEFAULT '';
+        CREATE INDEX IF NOT EXISTS idx_audit_hash ON audit_log(record_hash);""",
     ),
 }
 
