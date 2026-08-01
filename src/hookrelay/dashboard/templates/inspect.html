@@ -90,6 +90,30 @@
         </section>
         {% endif %}
 
+        <section class="delivery-timeline" aria-labelledby="delivery-heading">
+            <h2 id="delivery-heading">Delivery timeline</h2>
+            {% if delivery_attempts %}
+            <ol class="timeline-list">
+                {% for attempt in delivery_attempts %}
+                <li class="timeline-item status-{{ attempt.status }}">
+                    <div>
+                        <strong>{% if attempt.status == 'delivered' %}Delivered{% elif attempt.status == 'target_error' %}Target error{% else %}Transport error{% endif %}</strong>
+                        {% if attempt.response_status is not none %}<span class="badge">HTTP {{ attempt.response_status }}</span>{% endif %}
+                    </div>
+                    <div class="timeline-meta">
+                        {% if attempt.target_url %}<code>{{ attempt.target_url }}</code>{% endif %}
+                        {% if attempt.duration_ms is not none %}<span>{{ attempt.duration_ms }} ms</span>{% endif %}
+                        <time>{{ attempt.attempted_at }}</time>
+                    </div>
+                    {% if attempt.error %}<p class="delivery-error">{{ attempt.error }}</p>{% endif %}
+                </li>
+                {% endfor %}
+            </ol>
+            {% else %}
+            <p class="muted">No delivery result has been reported yet. Confirm that a forwarding client is connected to channel <code>{{ detail.channel }}</code>.</p>
+            {% endif %}
+        </section>
+
         <section class="request-details">
             <h2>Request Info</h2>
             <table class="detail-table">
@@ -122,6 +146,8 @@
 
         <section class="request-actions">
             <a href="/dashboard/replay/{{ detail.request_id }}" class="btn">Replay Request</a>
+            <button type="button" class="btn btn-danger" id="delete-request" data-request-id="{{ detail.request_id }}">Delete stored request</button>
+            <span id="delete-result" role="status" aria-live="polite"></span>
         </section>
 
         {% else %}

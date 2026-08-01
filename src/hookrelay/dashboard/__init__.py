@@ -81,14 +81,38 @@ def create_dashboard_router() -> APIRouter:
         offset: int = Query(0),
         validation_status: str | None = Query(None),
         path: str | None = Query(None),
+        q: str | None = Query(None),
+        view: str | None = Query(None),
     ):
         """History browser page with filters and pagination."""
         store = _storage.get()
+        selected_view = None
+        saved_views = store.list_request_views() if store else []
+        if store and view:
+            selected_view = store.get_request_view(view)
+            if selected_view:
+                filters = selected_view["filters"]
+                q = q or filters.get("q")
+                channel = channel or filters.get("channel")
+                method = method or filters.get("method")
+                path = path or filters.get("path")
+                validation_status = validation_status or filters.get("validation_status")
+                if limit == 20 and filters.get("limit"):
+                    limit = int(filters["limit"])
         if store:
-            requests = store.list_requests(
-                channel=channel, limit=limit, offset=offset, method=method, path=path
-            )
-            total = store.count_requests(channel=channel)
+            if q:
+                matched = store.search_requests(query=q, channel=channel, limit=10000)
+                if method:
+                    matched = [item for item in matched if item.get("method") == method]
+                if path:
+                    matched = [item for item in matched if path in item.get("path", "")]
+                total = len(matched)
+                requests = matched[offset : offset + limit]
+            else:
+                requests = store.list_requests(
+                    channel=channel, limit=limit, offset=offset, method=method, path=path
+                )
+                total = store.count_requests(channel=channel)
             for req in requests:
                 try:
                     vr = store.get_validation_results_for_request(
@@ -121,6 +145,10 @@ def create_dashboard_router() -> APIRouter:
                 "offset": offset,
                 "validation_status": validation_status,
                 "path": path,
+                "q": q,
+                "saved_views": saved_views,
+                "selected_view": selected_view,
+                "selected_view_id": view,
                 "has_next": offset + len(requests) < total,
             },
         )
@@ -134,6 +162,7 @@ def create_dashboard_router() -> APIRouter:
             detail = dict(detail)
             detail["headers"] = redact_headers(detail.get("headers", {}))
         validation_result = None
+        delivery_attempts = store.list_delivery_attempts(request_id) if store and detail else []
         if store and detail:
             try:
                 validation_result = store.get_validation_result(request_id)
@@ -143,7 +172,12 @@ def create_dashboard_router() -> APIRouter:
         return templates.TemplateResponse(
             request,
             "inspect.html",
-            {"detail": detail, "validation_result": validation_result, "request_id": request_id},
+            {
+                "detail": detail,
+                "validation_result": validation_result,
+                "delivery_attempts": delivery_attempts,
+                "request_id": request_id,
+            },
         )
 
     @router.get("/dashboard/replay/{request_id}", response_class=HTMLResponse)
@@ -199,6 +233,61 @@ def create_dashboard_router() -> APIRouter:
                 content={"error": f"Request {request_id} not found"},
             )
 
+
+
+
+
+    @router.get("/api/request-views")
+    async def list_request_views():
+        store = _storage.get()
+        return store.list_request_views() if store else []
+
+    @router.post("/api/request-views", status_code=201)
+    async def create_request_view(body: dict[str, Any]):
+        store = _storage.get()
+        if store is None:
+            return JSONResponse(status_code=503, content={"error": "Storage unavailable"})
+        try:
+            view_id = store.save_request_view(
+                str(body.get("name", "")), dict(body.get("filters", {}))
+            )
+        except (TypeError, ValueError) as exc:
+            return JSONResponse(status_code=422, content={"error": str(exc)})
+        return {"view_id": view_id, "name": body.get("name")}
+
+    @router.delete("/api/request-views/{view_id}", status_code=204)
+    async def delete_request_view(view_id: str):
+        store = _storage.get()
+        if store is None or not store.delete_request_view(view_id):
+            return JSONResponse(status_code=404, content={"error": "Saved view not found"})
+        return HTMLResponse(status_code=204)
+
+    @router.delete("/api/requests/{request_id}", status_code=204)
+    async def delete_request(request_id: str, confirm: bool = Query(False)):
+        """Delete one stored request after an explicit confirmation flag."""
+        if not confirm:
+            return JSONResponse(
+                status_code=400,
+                content={"error": "Set confirm=true to delete this request."},
+            )
+        store = _storage.get()
+        if store is None or not store.delete_request(request_id):
+            return JSONResponse(
+                status_code=404,
+                content={"error": f"Request {request_id} not found"},
+            )
+        return HTMLResponse(status_code=204)
+
+    @router.get("/api/requests/{request_id}/delivery-attempts")
+    async def delivery_attempts(request_id: str):
+        """Return delivery history for one stored request."""
+        store = _storage.get()
+        if store is None or store.get_request(request_id) is None:
+            return JSONResponse(
+                status_code=404,
+                content={"error": f"Request {request_id} not found"},
+            )
+        return store.list_delivery_attempts(request_id)
 
     @router.get("/api/dashboard/status")
     async def dashboard_status():

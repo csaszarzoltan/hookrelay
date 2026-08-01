@@ -53,6 +53,28 @@ class RelayManager:
         self._channels[channel] = still_connected
         return received_count
 
+    async def broadcast_async(self, channel: str, message: dict[str, Any]) -> int:
+        """Send JSON to ASGI WebSocket clients registered on a channel."""
+        if channel not in self._channels:
+            return 0
+        received_count = 0
+        still_connected: list[Any] = []
+        for ws in self._channels[channel]:
+            try:
+                if hasattr(ws, "send_json"):
+                    await ws.send_json(message)
+                else:
+                    ws.send(json.dumps(message))
+                received_count += 1
+                still_connected.append(ws)
+            except Exception:
+                pass
+        if still_connected:
+            self._channels[channel] = still_connected
+        else:
+            self._channels.pop(channel, None)
+        return received_count
+
     def get_connected_clients(self, channel: str) -> int:
         """Return the count of connected clients on a channel."""
         return len(self._channels.get(channel, []))

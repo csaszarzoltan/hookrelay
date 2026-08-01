@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import time
 from typing import Any
 
 import requests
@@ -114,18 +115,38 @@ def connect_and_forward(
                 continue
             data = json.loads(raw)
 
-            # Skip non-webhook messages
-            if data.get("type") in ("heartbeat", "replay"):
+            message_type = data.get("type")
+            if message_type in ("heartbeat", "pong"):
+                continue
+            if message_type not in (None, "webhook", "replay"):
                 continue
 
             request_data = data.get("data", data)
-
             if on_request:
                 on_request(request_data)
 
             client = WebSocketClient(server_url, channel, target_url)
             client._ws = ws_conn  # reuse connection
-            client.forward_to_local(request_data, timeout=timeout)
+            started = time.perf_counter()
+            report = {
+                "request_id": request_data.get("request_id"),
+                "target_url": target_url,
+            }
+            try:
+                response = client.forward_to_local(request_data, timeout=timeout)
+                status_code = response.get("status")
+                report.update({
+                    "status": "delivered" if status_code is not None and status_code < 400 else "target_error",
+                    "response_status": status_code,
+                })
+            except Exception as exc:
+                report.update({
+                    "status": "transport_error",
+                    "response_status": None,
+                    "error": str(exc),
+                })
+            report["duration_ms"] = round((time.perf_counter() - started) * 1000, 2)
+            ws_conn.send(json.dumps({"type": "delivery_result", "data": report}))
     finally:
         try:
             ws_conn.close()

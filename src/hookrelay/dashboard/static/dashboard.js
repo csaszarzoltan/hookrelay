@@ -156,4 +156,68 @@
             return false;
         };
     }
+    const savedViewSelect = document.getElementById('saved-view');
+    if (savedViewSelect) {
+        savedViewSelect.addEventListener('change', function () {
+            if (savedViewSelect.value) {
+                window.location.assign('/dashboard/history?view=' + encodeURIComponent(savedViewSelect.value));
+            }
+        });
+    }
+
+    const saveViewButton = document.getElementById('save-view');
+    if (saveViewButton) {
+        saveViewButton.addEventListener('click', function () {
+            const name = window.prompt('Name this request view:');
+            if (!name) return;
+            const params = new URLSearchParams(new FormData(document.getElementById('history-filter-form')));
+            const filters = {};
+            params.forEach(function (value, key) { if (value) filters[key] = value; });
+            fetch('/api/request-views', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ name: name, filters: filters })
+            }).then(async function (response) {
+                const payload = await response.json().catch(function () { return {}; });
+                if (!response.ok) throw new Error(payload.error || 'Could not save view');
+                window.location.assign('/dashboard/history?view=' + encodeURIComponent(payload.view_id));
+            }).catch(function (error) {
+                document.getElementById('view-result').textContent = error.message;
+            });
+        });
+    }
+
+    const deleteViewButton = document.getElementById('delete-view');
+    if (deleteViewButton) {
+        deleteViewButton.addEventListener('click', function () {
+            if (!window.confirm('Delete this saved view? Stored requests will not be deleted.')) return;
+            fetch('/api/request-views/' + encodeURIComponent(deleteViewButton.dataset.viewId), {
+                method: 'DELETE'
+            }).then(function (response) {
+                if (!response.ok) throw new Error('Could not delete view');
+                window.location.assign('/dashboard/history');
+            }).catch(function (error) {
+                document.getElementById('view-result').textContent = error.message;
+            });
+        });
+    }
+
+    const deleteButton = document.getElementById('delete-request');
+    if (deleteButton) {
+        deleteButton.addEventListener('click', function () {
+            const requestId = deleteButton.dataset.requestId;
+            if (!window.confirm('Permanently delete this stored request and its diagnostic history?')) return;
+            deleteButton.disabled = true;
+            fetch('/api/requests/' + encodeURIComponent(requestId) + '?confirm=true', {
+                method: 'DELETE'
+            }).then(function (response) {
+                if (!response.ok) throw new Error('Delete failed with HTTP ' + response.status);
+                window.location.assign('/dashboard/history');
+            }).catch(function (error) {
+                document.getElementById('delete-result').textContent = error.message;
+                deleteButton.disabled = false;
+            });
+        });
+    }
+
 })();

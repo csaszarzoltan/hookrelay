@@ -46,9 +46,35 @@ def _register_relay_ws(app: FastAPI) -> None:
         await ws.send_text(json.dumps({"type": "heartbeat", "channel": channel}))
         try:
             while True:
-                data = await ws.receive_text()
-                if data == "ping":
+                raw = await ws.receive_text()
+                if raw == "ping":
                     await ws.send_text(json.dumps({"type": "pong"}))
+                    continue
+                try:
+                    message = json.loads(raw)
+                except json.JSONDecodeError:
+                    continue
+                if message.get("type") == "delivery_result":
+                    data = message.get("data", {})
+                    request_id = data.get("request_id")
+                    if request_id:
+                        store = _get_or_create_storage()
+                        try:
+                            store.store_delivery_attempt(
+                                request_id=request_id,
+                                channel=channel,
+                                target_url=data.get("target_url"),
+                                status=data.get("status", "transport_error"),
+                                response_status=data.get("response_status"),
+                                duration_ms=data.get("duration_ms"),
+                                error=data.get("error"),
+                            )
+                            await get_live_manager().broadcast({
+                                "type": "delivery_result",
+                                "data": {**data, "channel": channel},
+                            })
+                        except Exception:
+                            pass
         except Exception:
             pass
         finally:
@@ -219,6 +245,22 @@ async def _handle_webhook(channel: str, request: Request):
     except Exception:
         pass
 
+    # Forward the complete request to relay clients on the selected channel.
+    relay_payload = {
+        "request_id": request_id,
+        "channel": channel,
+        "method": method,
+        "path": result.get("path", "/"),
+        "headers": headers,
+        "body": body.decode("utf-8", errors="replace"),
+        "query_params": query_params,
+        "source_ip": source_ip,
+        "received_at": result.get("received_at", ""),
+    }
+    forwarded_clients = await get_relay_manager().broadcast_async(
+        channel, {"type": "webhook", "data": relay_payload}
+    )
+
     # Broadcast a complete, JSON-safe summary to connected dashboards.
     try:
         await get_live_manager().broadcast({
@@ -243,6 +285,7 @@ async def _handle_webhook(channel: str, request: Request):
             "channel": channel,
             "method": method,
             "path": result.get("path", "/"),
+            "forwarded_clients": forwarded_clients,
         },
     )
 

@@ -22,8 +22,23 @@
             <span class="validation-badge info">Validation status column shows per-request results</span>
         </header>
 
+        <section class="saved-views" aria-labelledby="saved-views-heading">
+            <h2 id="saved-views-heading">Saved views</h2>
+            <div class="saved-view-controls">
+                <label for="saved-view">Open view</label>
+                <select id="saved-view">
+                    <option value="">Choose a saved view</option>
+                    {% for item in saved_views %}<option value="{{ item.view_id }}" {% if selected_view_id == item.view_id %}selected{% endif %}>{{ item.name }}</option>{% endfor %}
+                </select>
+                <button type="button" class="btn btn-secondary" id="save-view">Save current filters</button>
+                {% if selected_view_id %}<button type="button" class="btn btn-danger" id="delete-view" data-view-id="{{ selected_view_id }}">Delete view</button>{% endif %}
+                <span id="view-result" role="status" aria-live="polite"></span>
+            </div>
+        </section>
+
         <section class="filters">
-            <form method="get" action="/dashboard/history">
+            <form method="get" action="/dashboard/history" id="history-filter-form">
+                <label class="search-field"><span>Search payload, path, and headers</span><input type="search" name="q" placeholder="e.g. invoice.failed" value="{{ q or '' }}"></label>
                 <label><span>Channel</span><input type="text" name="channel" placeholder="e.g. payments" value="{{ channel or '' }}"></label>
                 <label><span>Method</span><select name="method">
                     <option value="">All methods</option>
@@ -80,9 +95,9 @@
 
             <div class="pagination">
                 {% if offset > 0 %}
-                <a href="/dashboard/history?channel={{ channel or "" }}&method={{ method or "" }}&path={{ path or "" }}&validation_status={{ validation_status or "" }}&limit={{ limit }}&offset={{ offset - limit }}">&laquo; Previous</a>
+                <a href="/dashboard/history?q={{ q or "" }}&channel={{ channel or "" }}&method={{ method or "" }}&path={{ path or "" }}&validation_status={{ validation_status or "" }}&limit={{ limit }}&offset={{ offset - limit }}">&laquo; Previous</a>
                 {% endif %}
-                {% if has_next %}<a href="/dashboard/history?channel={{ channel or "" }}&method={{ method or "" }}&path={{ path or "" }}&validation_status={{ validation_status or "" }}&limit={{ limit }}&offset={{ offset + limit }}">Next &raquo;</a>{% endif %}
+                {% if has_next %}<a href="/dashboard/history?q={{ q or "" }}&channel={{ channel or "" }}&method={{ method or "" }}&path={{ path or "" }}&validation_status={{ validation_status or "" }}&limit={{ limit }}&offset={{ offset + limit }}">Next &raquo;</a>{% endif %}
             </div>
             {% else %}
             <div class="empty-state">

@@ -62,6 +62,27 @@ class Storage:
                 INSERT INTO webhooks_fts(rowid, request_id, channel, method, path, headers, body)
                 VALUES (new.rowid, new.request_id, new.channel, new.method, new.path, new.headers, coalesce(new.body, ''));
             END;
+            CREATE TABLE IF NOT EXISTS delivery_attempts (
+                attempt_id TEXT PRIMARY KEY,
+                request_id TEXT NOT NULL,
+                channel TEXT NOT NULL,
+                target_url TEXT,
+                status TEXT NOT NULL,
+                response_status INTEGER,
+                duration_ms REAL,
+                error TEXT,
+                attempted_at TEXT NOT NULL,
+                FOREIGN KEY(request_id) REFERENCES webhooks(request_id) ON DELETE CASCADE
+            );
+            CREATE INDEX IF NOT EXISTS idx_delivery_request
+                ON delivery_attempts(request_id, attempted_at DESC);
+            CREATE TABLE IF NOT EXISTS request_views (
+                view_id TEXT PRIMARY KEY,
+                name TEXT NOT NULL UNIQUE COLLATE NOCASE,
+                filters TEXT NOT NULL DEFAULT '{}',
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
         """)
         self._conn.commit()
 
@@ -138,6 +159,35 @@ class Storage:
         rows = self._conn.execute(query, params).fetchall()
         return [self._row_to_dict(r) for r in rows]
 
+    def delete_request(self, request_id: str) -> bool:
+        """Delete one request and all related diagnostic records."""
+        self._init_validation_results_table()
+        with self._conn:
+            self._conn.execute(
+                "DELETE FROM delivery_attempts WHERE request_id = ?", (request_id,)
+            )
+            self._conn.execute(
+                "DELETE FROM validation_results WHERE request_id = ?", (request_id,)
+            )
+            cursor = self._conn.execute(
+                "DELETE FROM webhooks WHERE request_id = ?", (request_id,)
+            )
+        return cursor.rowcount > 0
+
+    def purge_requests_older_than(self, days: int) -> int:
+        """Delete requests older than the provided positive retention period."""
+        if days < 1:
+            raise ValueError("days must be at least 1")
+        from datetime import timedelta
+
+        cutoff = (datetime.now(UTC) - timedelta(days=days)).isoformat()
+        rows = self._conn.execute(
+            "SELECT request_id FROM webhooks WHERE received_at < ?", (cutoff,)
+        ).fetchall()
+        for row in rows:
+            self.delete_request(row["request_id"])
+        return len(rows)
+
     def count_requests(self, channel: str | None = None) -> int:
         """Count stored requests."""
         if channel is not None:
@@ -149,6 +199,42 @@ class Storage:
             row = self._conn.execute("SELECT COUNT(*) as cnt FROM webhooks").fetchone()
         return row["cnt"] if row else 0
 
+
+    def store_delivery_attempt(
+        self,
+        request_id: str,
+        channel: str,
+        status: str,
+        target_url: str | None = None,
+        response_status: int | None = None,
+        duration_ms: float | None = None,
+        error: str | None = None,
+    ) -> str:
+        """Persist one local forwarding or replay outcome."""
+        attempt_id = uuid4().hex
+        attempted_at = datetime.now(UTC).isoformat()
+        self._conn.execute(
+            """INSERT INTO delivery_attempts
+               (attempt_id, request_id, channel, target_url, status,
+                response_status, duration_ms, error, attempted_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (
+                attempt_id, request_id, channel, target_url, status,
+                response_status, duration_ms, error, attempted_at,
+            ),
+        )
+        self._conn.commit()
+        return attempt_id
+
+    def list_delivery_attempts(self, request_id: str) -> list[dict[str, Any]]:
+        """Return newest-first delivery attempts for a request."""
+        rows = self._conn.execute(
+            """SELECT * FROM delivery_attempts
+               WHERE request_id = ? ORDER BY attempted_at DESC""",
+            (request_id,),
+        ).fetchall()
+        return [dict(row) for row in rows]
+
     def increment_replay_count(self, request_id: str) -> None:
         """Increment the replay counter for a request."""
         self._conn.execute(
@@ -156,6 +242,64 @@ class Storage:
             (request_id,),
         )
         self._conn.commit()
+
+    def save_request_view(self, name: str, filters: dict[str, Any]) -> str:
+        """Save a named request-search configuration."""
+        cleaned_name = name.strip()
+        if not cleaned_name:
+            raise ValueError("view name must not be empty")
+        existing = self._conn.execute(
+            "SELECT view_id FROM request_views WHERE name = ? COLLATE NOCASE",
+            (cleaned_name,),
+        ).fetchone()
+        if existing:
+            raise ValueError(f"request view '{cleaned_name}' already exists")
+        allowed = {"q", "channel", "method", "path", "validation_status", "limit"}
+        cleaned = {
+            key: value for key, value in filters.items()
+            if key in allowed and value not in (None, "")
+        }
+        view_id = uuid4().hex
+        now = datetime.now(UTC).isoformat()
+        self._conn.execute(
+            """INSERT INTO request_views
+               (view_id, name, filters, created_at, updated_at)
+               VALUES (?, ?, ?, ?, ?)""",
+            (view_id, cleaned_name, json.dumps(cleaned), now, now),
+        )
+        self._conn.commit()
+        return view_id
+
+    def get_request_view(self, view_id: str) -> dict[str, Any] | None:
+        """Load one saved request view."""
+        row = self._conn.execute(
+            "SELECT * FROM request_views WHERE view_id = ?", (view_id,)
+        ).fetchone()
+        if row is None:
+            return None
+        result = dict(row)
+        result["filters"] = json.loads(result["filters"])
+        return result
+
+    def list_request_views(self) -> list[dict[str, Any]]:
+        """List saved request views by name."""
+        rows = self._conn.execute(
+            "SELECT * FROM request_views ORDER BY name COLLATE NOCASE"
+        ).fetchall()
+        results = []
+        for row in rows:
+            item = dict(row)
+            item["filters"] = json.loads(item["filters"])
+            results.append(item)
+        return results
+
+    def delete_request_view(self, view_id: str) -> bool:
+        """Delete one saved request view."""
+        cursor = self._conn.execute(
+            "DELETE FROM request_views WHERE view_id = ?", (view_id,)
+        )
+        self._conn.commit()
+        return cursor.rowcount > 0
 
     def search_requests(
         self,
