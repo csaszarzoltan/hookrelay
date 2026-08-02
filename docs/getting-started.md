@@ -66,7 +66,7 @@ curl http://localhost:8000/health
 Returns:
 
 ```json
-{"status": "ok", "version": "0.2.0", "uptime": 123.45, "total_requests": 42}
+{"status": "ok", "version": "1.5.0"}
 ```
 
 ## Forwarding Webhooks
@@ -152,3 +152,18 @@ hookrelay serve --host 0.0.0.0
 ```
 
 Use the same environment variable when running a forwarding client. The client sends it as a Bearer token during the relay WebSocket handshake. Browser users sign in through `/dashboard/login`. Use a TLS-terminating reverse proxy for network deployments.
+
+## Next steps (v1.5.0)
+
+Hookrelay 1.5 adds production webhook infrastructure: reliable delivery and
+inbound signature verification. Start with the per-feature guides:
+
+- [Delivery infrastructure (retry queue & tracking)](delivery-infrastructure-1.5.md)
+- [Dead-letter queue](dead-letter-queue-1.5.md)
+- [Idempotency](idempotency-1.5.md)
+- [HMAC signature verification](hmac-verification-1.5.md)
+- [Endpoint configuration](endpoint-config-1.5.md)
+- [Dashboard delivery metrics](dashboard-metrics-1.5.md)
+
+Every guide pairs with a runnable example under [`../examples/`](../examples/),
+for example `python examples/hmac_verification.py`.

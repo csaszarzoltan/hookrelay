@@ -4,7 +4,7 @@
 
 [![GitHub Release](https://img.shields.io/github/v/release/csaszarzoltan/hookrelay?logo=github)](https://github.com/csaszarzoltan/hookrelay/releases)
 [![Python](https://img.shields.io/badge/python-3.11+-blue?logo=python)](https://python.org)
-[![Tests](https://img.shields.io/badge/tests-244%20passing-brightgreen)](https://github.com/csaszarzoltan/hookrelay/actions)
+[![Tests](https://img.shields.io/badge/tests-731%20passing-brightgreen)](https://github.com/csaszarzoltan/hookrelay/actions)
 [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 [![Dashboard](https://img.shields.io/badge/feature-dashboard-blueviolet)](#web-dashboard)
 
@@ -14,13 +14,16 @@
 
 ### What is new in 1.5.0
 
+- **Production delivery infrastructure** — persistent `RetryQueue` with capped exponential backoff (optional jitter), `DeadLetterQueue` with failure metadata and requeue, `DeliveryTracker` state machine (pending → delivered | in-dlq), and TTL-based `IdempotencyManager` dedup
+- **HMAC verification & per-endpoint configuration** — Svix-style `t=,v1=` signatures with constant-time compare and timestamp tolerance; `EndpointConfig` (timeout/retries/headers/secret) validated against the SSRF guard at configuration time
+- **Team dashboard metrics** — counts by status/endpoint, nearest-rank p50/p95/p99 latency, success rates, and a composed `DashboardService` summary payload
 - Optional AES-256-GCM encryption for backup database files
 - Per-backup random salt and nonce
 - PBKDF2-HMAC-SHA256 key derivation with 600,000 iterations
 - Encryption-aware Backup center, API, scheduler, CLI, inspection, and restore
 - Locked catalog verification without decrypting content
 - Backward-compatible plaintext backup format v1 support
-- **514 passing tests and zero failures**
+- **731 passing tests and zero failures**
 
 ### Included from 1.4.0
 
@@ -100,6 +103,7 @@
 - **History Browser** — paginated, filterable table with channel/method/path filters and FTS5 search
 - **Request Replay** — one-click replay from the dashboard with inline result display
 - **Live Monitoring WebSocket** — `/dashboard/ws/live` for programmatic real-time event streaming
+- **Team delivery metrics (v1.5.0+)** — read-only analyzers for counts by status/endpoint, p50/p95/p99 latency, and success rates, ready to power dashboard/API views (`hookrelay.dashboard.*`, see [dashboard metrics guide](docs/dashboard-metrics-1.5.md))
 
 ## Installation
 
@@ -162,6 +166,53 @@ hookrelay history
 hookrelay replay <request-id>
 ```
 
+## Reliable delivery & webhook security (v1.5.0+)
+
+v1.5.0 adds production webhook infrastructure you can use directly from
+Python: a persistent retry queue, dead-letter queue, idempotency dedup,
+Svix-style HMAC signature verification, and validated per-endpoint
+configuration.
+
+Sign and verify webhook payloads:
+
+```python
+from hookrelay.security import HMACVerifier
+
+verifier = HMACVerifier(secret="whsec_...", tolerance_seconds=300)
+signature = verifier.sign(payload)          # t=<unix_ts>,v1=<hex>
+assert verifier.verify(payload, signature)  # constant-time, replay-aware
+```
+
+Enqueue a delivery with retries and idempotency:
+
+```python
+from hookrelay.config.retry_policy import RetryPolicy
+from hookrelay.delivery import RetryQueue
+from hookrelay.storage import Storage
+
+queue = RetryQueue(Storage("webhooks.db"))
+queue.enqueue(
+    delivery_id="dlv-1",
+    request_id="req-1",
+    endpoint_id="ep-1",
+    target_url="https://example.com/hook",
+    method="POST",
+    headers={},
+    body=b'{"event": "order.created"}',
+    idempotency_key="stripe_evt_123",       # duplicate events are rejected
+    policy=RetryPolicy(max_retries=5, jitter=True),
+)
+```
+
+Every target URL passes the shared SSRF guard at enqueue and at configuration
+time. Feature guides: [delivery infrastructure](docs/delivery-infrastructure-1.5.md),
+[dead-letter queue](docs/dead-letter-queue-1.5.md),
+[idempotency](docs/idempotency-1.5.md),
+[HMAC verification](docs/hmac-verification-1.5.md),
+[endpoint configuration](docs/endpoint-config-1.5.md), and
+[dashboard metrics](docs/dashboard-metrics-1.5.md). Runnable examples for
+every feature live in [`examples/`](examples/).
+
 ## Screenshots
 
 | Dashboard Live Feed | Payload Inspector |
@@ -209,6 +260,9 @@ hookrelay/
 │       ├── server.py             # FastAPI server (dashboard + relay + APIs)
 │       ├── ssrf.py               # SSRF protection
 │       ├── storage.py            # SQLite storage with FTS5
+│       ├── config/               # Per-endpoint config (RetryPolicy, headers)
+│       ├── delivery/             # Retry queue, DLQ, idempotency, tracking
+│       ├── security/             # HMAC signature verification
 │       └── dashboard/            # Web Dashboard module
 │           ├── __init__.py       # Dashboard router (all UI routes)
 │           ├── connection_manager.py  # WebSocket connection manager
@@ -239,7 +293,22 @@ hookrelay/
 │   ├── getting-started.md        # Getting started guide
 │   ├── cli-reference.md          # CLI command reference
 │   ├── dashboard-guide.md        # Dashboard user guide
+│   ├── delivery-infrastructure-1.5.md  # Retry queue & delivery tracking
+│   ├── dead-letter-queue-1.5.md  # Dead-letter queue guide
+│   ├── idempotency-1.5.md        # Idempotency dedup guide
+│   ├── hmac-verification-1.5.md  # HMAC signature verification guide
+│   ├── endpoint-config-1.5.md    # Per-endpoint configuration guide
+│   ├── dashboard-metrics-1.5.md  # Dashboard delivery metrics guide
 │   └── screenshots/              # Dashboard screenshots
+├── examples/
+│   ├── basic_relay.py            # Local receiver + relay flow
+│   ├── api_usage.py              # History inspection via the client API
+│   ├── delivery_retry_queue.py   # Retry queue & delivery tracking
+│   ├── dead_letter_queue.py      # DLQ inspect/requeue workflow
+│   ├── idempotency.py            # Idempotency key registry
+│   ├── hmac_verification.py      # Sign/verify webhook payloads
+│   ├── endpoint_config.py        # EndpointConfig + HeaderManager
+│   └── dashboard_metrics.py      # Metrics, latency, success-rate analyzers
 ├── CHANGELOG.md
 └── pyproject.toml
 ```

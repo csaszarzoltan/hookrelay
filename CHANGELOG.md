@@ -37,6 +37,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - `docs/data-requirements-1.0.md` — versioned data contracts and reliability requirements
 - `docs/backup-center-1.4.md` — backup/restore, encryption, and storage health guide
+- `docs/delivery-infrastructure-1.5.md` — retry queue, delivery tracking, and retry policy guide
+- `docs/dead-letter-queue-1.5.md` — DLQ inspect/requeue guide
+- `docs/idempotency-1.5.md` — TTL-based idempotency dedup guide
+- `docs/hmac-verification-1.5.md` — Svix-style HMAC signature verification guide
+- `docs/endpoint-config-1.5.md` — per-endpoint configuration and header management guide
+- `docs/dashboard-metrics-1.5.md` — metrics, latency, and success-rate analyzers guide
+- `examples/delivery_retry_queue.py`, `examples/dead_letter_queue.py`, `examples/idempotency.py`, `examples/hmac_verification.py`, `examples/endpoint_config.py`, `examples/dashboard_metrics.py` — runnable, verified examples for each new feature
 - `docs/product-ux-requirements-report.md` / `-0.9.md` — UX requirements reports
 - `docs/dashboard-guide.md`, `docs/cli-reference.md`, `docs/getting-started.md` — updated for auth, retention, delivery, and data commands
 - `IMPLEMENTATION_REPORT.md` — per-release implementation notes

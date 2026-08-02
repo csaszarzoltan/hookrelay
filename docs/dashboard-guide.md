@@ -186,12 +186,7 @@ The dashboard client automatically reconnects after a 3-second delay if the WebS
 Returns server status in JSON:
 
 ```json
-{
-  "status": "ok",
-  "version": "0.2.0",
-  "uptime": 123.45,
-  "total_requests": 42
-}
+{"status": "ok", "version": "1.5.0"}
 ```
 
 ---
