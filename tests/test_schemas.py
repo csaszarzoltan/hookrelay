@@ -78,14 +78,10 @@ class TestSchemaStoreCRUDBehavioral:
     """Call SchemaStore CRUD methods with expected behavior."""
 
     @pytest.fixture
-    def store(self):
-        """Create a SchemaStore with an in-memory Storage."""
-        import os
-        import tempfile
-
+    def store(self, tmp_path):
+        """Create a SchemaStore with an isolated Storage (per-test tmp DB)."""
         from hookrelay.storage import Storage
-        db_path = os.path.join(tempfile.gettempdir(), "hookrelay_test_schemas.db")
-        storage = Storage(db_path)
+        storage = Storage(tmp_path / "hookrelay_test_schemas.db")
         return SchemaStore(storage)
 
     def test_behavior_create_schema_returns_record(self, store):
@@ -193,13 +189,9 @@ class TestSchemaStoreValidationBehavioral:
     """SchemaStore should validate inputs."""
 
     @pytest.fixture
-    def store(self):
-        import os
-        import tempfile
-
+    def store(self, tmp_path):
         from hookrelay.storage import Storage
-        db_path = os.path.join(tempfile.gettempdir(), "hookrelay_test_schemas_valid.db")
-        storage = Storage(db_path)
+        storage = Storage(tmp_path / "hookrelay_test_schemas_valid.db")
         return SchemaStore(storage)
 
     def test_behavior_create_schema_rejects_empty_name(self, store):

@@ -6,6 +6,7 @@ from dataclasses import asdict, dataclass, field
 from urllib.parse import urlparse
 
 from hookrelay.config.retry_policy import RetryPolicy
+from hookrelay.ssrf import validate_target_url
 
 #: Protocols accepted by :meth:`EndpointConfig.validate`.
 _ALLOWED_SCHEMES = ("http", "https")
@@ -39,12 +40,22 @@ class EndpointConfig:
         return cls(**known)
 
     def validate(self) -> None:
-        """Raise ValueError on bad url / timeout <= 0 / max_retries < 0."""
+        """Raise ValueError on bad url / timeout <= 0 / max_retries < 0.
+
+        URL validation delegates to the repo's shared SSRF guard
+        (:func:`hookrelay.ssrf.validate_target_url`) so that the same
+        checks apply whether the URL is supplied at configuration time
+        or at enqueue/dispatch time.  Private IPs, link-local addresses,
+        and system ports (< 1024) are rejected.
+        """
         if not self.url:
             raise ValueError("endpoint url must not be empty")
         parsed = urlparse(self.url)
         if parsed.scheme not in _ALLOWED_SCHEMES or not parsed.netloc:
             raise ValueError(f"invalid endpoint url: {self.url!r}")
+        is_valid, reason = validate_target_url(self.url)
+        if not is_valid:
+            raise ValueError(f"endpoint url fails SSRF guard: {reason}")
         if self.timeout_seconds <= 0:
             raise ValueError(f"timeout_seconds must be > 0, got {self.timeout_seconds!r}")
         if self.retry_policy.max_retries < 0:

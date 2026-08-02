@@ -5,7 +5,7 @@ from __future__ import annotations
 import sqlite3
 from datetime import UTC, datetime
 
-CURRENT_SCHEMA_VERSION = 4
+CURRENT_SCHEMA_VERSION = 5
 
 _MIGRATIONS: dict[int, tuple[str, str]] = {
     1: (
@@ -54,6 +54,12 @@ _MIGRATIONS: dict[int, tuple[str, str]] = {
         """ALTER TABLE audit_log ADD COLUMN previous_hash TEXT NOT NULL DEFAULT '';
         ALTER TABLE audit_log ADD COLUMN record_hash TEXT NOT NULL DEFAULT '';
         CREATE INDEX IF NOT EXISTS idx_audit_hash ON audit_log(record_hash);""",
+    ),
+    5: (
+        "delivery-delivery-id",
+        """CREATE TABLE IF NOT EXISTS _mig5_dummy (dummy INTEGER);
+        DROP TABLE IF EXISTS _mig5_dummy;
+        """,
     ),
 }
 

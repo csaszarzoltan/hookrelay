@@ -20,9 +20,43 @@ class Storage:
         self._db_path = db_path
         self._conn = sqlite3.connect(db_path, check_same_thread=False)
         self._conn.row_factory = sqlite3.Row
+        # Ensure delivery_id/endpoint_id columns exist BEFORE _init_schema's
+        # DDL runs: CREATE INDEX IF NOT EXISTS on delivery_attempts(delivery_id)
+        # crashes with "no such column" if a pre-existing v4 table lacks the
+        # column, and CREATE TABLE IF NOT EXISTS won't add columns to an
+        # existing table. _ensure_delivery_attempt_columns early-returns on a
+        # fresh DB (table not created yet); _init_schema then creates the
+        # table with the full column set.
+        self._ensure_delivery_attempt_columns()
         self._init_schema()
         run_migrations(self._conn)
         self._backfill_audit_hash_chain()
+
+    def _ensure_delivery_attempt_columns(self) -> None:
+        """Add delivery_id/endpoint_id to delivery_attempts if missing.
+
+        The T3 R3 fix persists delivery_id and endpoint_id on
+        delivery_attempts to fix latency attribution under request fan-out.
+        ``CREATE TABLE IF NOT EXISTS`` won't add columns to an existing table,
+        so we probe ``PRAGMA table_info`` and ALTER when needed.
+        """
+        row = self._conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='delivery_attempts'"
+        ).fetchone()
+        if row is None:
+            return
+        cols = {r["name"] for r in self._conn.execute(
+            "PRAGMA table_info(delivery_attempts)"
+        ).fetchall()}
+        if "delivery_id" not in cols:
+            self._conn.execute(
+                "ALTER TABLE delivery_attempts ADD COLUMN delivery_id TEXT"
+            )
+        if "endpoint_id" not in cols:
+            self._conn.execute(
+                "ALTER TABLE delivery_attempts ADD COLUMN endpoint_id TEXT"
+            )
+        self._conn.commit()
 
     def _init_schema(self) -> None:
         self._conn.executescript("""
@@ -71,7 +105,9 @@ class Storage:
             CREATE TABLE IF NOT EXISTS delivery_attempts (
                 attempt_id TEXT PRIMARY KEY,
                 request_id TEXT NOT NULL,
+                delivery_id TEXT,
                 channel TEXT NOT NULL,
+                endpoint_id TEXT,
                 target_url TEXT,
                 status TEXT NOT NULL,
                 response_status INTEGER,
@@ -84,6 +120,8 @@ class Storage:
             );
             CREATE INDEX IF NOT EXISTS idx_delivery_request
                 ON delivery_attempts(request_id, attempted_at DESC);
+            CREATE INDEX IF NOT EXISTS idx_delivery_delivery_id
+                ON delivery_attempts(delivery_id, attempted_at DESC);
             CREATE TABLE IF NOT EXISTS app_settings (
                 setting_key TEXT PRIMARY KEY,
                 setting_value TEXT NOT NULL,
@@ -459,6 +497,8 @@ class Storage:
         error: str | None = None,
         response_headers: dict[str, Any] | None = None,
         response_body: str | bytes | None = None,
+        delivery_id: str | None = None,
+        endpoint_id: str | None = None,
     ) -> str:
         """Persist a forwarding outcome with bounded, redacted response data."""
         sensitive = {"authorization", "proxy-authorization", "cookie", "set-cookie", "x-api-key", "x-auth-token", "api-key"}
@@ -479,13 +519,15 @@ class Storage:
         attempted_at = datetime.now(UTC).isoformat()
         self._conn.execute(
             """INSERT INTO delivery_attempts
-               (attempt_id, request_id, channel, target_url, status,
-                response_status, duration_ms, error, response_headers,
-                response_body, response_body_truncated, attempted_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-            (attempt_id, request_id, channel, target_url, status,
-             response_status, duration_ms, error, json.dumps(headers),
-             body_text, 1 if truncated else 0, attempted_at),
+               (attempt_id, request_id, delivery_id, endpoint_id, channel,
+                target_url, status, response_status, duration_ms, error,
+                response_headers, response_body, response_body_truncated,
+                attempted_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (attempt_id, request_id, delivery_id, endpoint_id, channel,
+             target_url, status, response_status, duration_ms, error,
+             json.dumps(headers), body_text, 1 if truncated else 0,
+             attempted_at),
         )
         self._conn.commit()
         return attempt_id

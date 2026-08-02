@@ -44,15 +44,16 @@ class LatencyTracker:
             conditions.append("da.attempted_at >= ?")
             params.append(cutoff)
         if endpoint_id is not None:
-            # delivery_attempts carries no endpoint_id; resolve it through the
-            # canonical deliveries table by request_id.
+            # Join delivery_attempts -> deliveries on delivery_id (unique per
+            # delivery) rather than request_id, which is 1:N under fan-out and
+            # would misattribute latency under shared request_ids.
             if not _deliveries_table_exists(conn):
                 return []
-            conditions.append("d.endpoint_id = ?")
+            conditions.append("da.delivery_id = d.delivery_id AND d.endpoint_id = ?")
             params.append(endpoint_id)
             query = (
                 "SELECT da.duration_ms FROM delivery_attempts da "
-                "JOIN deliveries d ON d.request_id = da.request_id "
+                "JOIN deliveries d ON da.delivery_id = d.delivery_id "
                 "WHERE " + " AND ".join(conditions)
             )
         else:

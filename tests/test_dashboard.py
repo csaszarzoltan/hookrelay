@@ -75,6 +75,8 @@ def _seed_attempt(
     *,
     attempt_id: str,
     request_id: str,
+    delivery_id: str | None = None,
+    endpoint_id: str | None = None,
     status: str = "delivered",
     duration_ms: float | None = None,
     attempted_at: datetime | None = None,
@@ -82,12 +84,15 @@ def _seed_attempt(
     """Insert one delivery_attempt row (v4 table, always present)."""
     storage._conn.execute(
         "INSERT INTO delivery_attempts "
-        "(attempt_id, request_id, channel, target_url, status, response_status, "
-        " duration_ms, error, response_headers, response_body, response_body_truncated, attempted_at) "
-        "VALUES (?, ?, 'test', NULL, ?, NULL, ?, NULL, '{}', NULL, 0, ?)",
+        "(attempt_id, request_id, delivery_id, endpoint_id, channel, "
+        " target_url, status, response_status, duration_ms, error, "
+        " response_headers, response_body, response_body_truncated, attempted_at) "
+        "VALUES (?, ?, ?, ?, 'test', NULL, ?, NULL, ?, NULL, '{}', NULL, 0, ?)",
         (
             attempt_id,
             request_id,
+            delivery_id,
+            endpoint_id,
             status,
             duration_ms,
             (attempted_at or datetime.now(UTC)).isoformat(),
@@ -313,6 +318,8 @@ def _seed_event(
         storage,
         attempt_id=f"att-{delivery_id}",
         request_id=request_id,
+        delivery_id=delivery_id,
+        endpoint_id=endpoint_id,
         status=attempt_status,
         duration_ms=duration_ms,
         attempted_at=created_at,

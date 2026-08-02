@@ -22,6 +22,7 @@ from typing import TYPE_CHECKING, Any
 from hookrelay.delivery.dlq import DeadLetterQueue
 from hookrelay.delivery.idempotency import IdempotencyManager
 from hookrelay.delivery.tracker import DELIVERIES_SCHEMA, DeliveryStatus
+from hookrelay.ssrf import validate_target_url
 from hookrelay.storage import Storage
 
 if TYPE_CHECKING:
@@ -74,8 +75,11 @@ class RetryQueue:
         """Insert delivery row with status='pending', next_attempt_at=now.
 
         Returns delivery_id. Raises ValueError if idempotency_key already
-        active.
+        active or if ``target_url`` fails the SSRF guard.
         """
+        is_valid, reason = validate_target_url(target_url)
+        if not is_valid:
+            raise ValueError(f"target_url fails SSRF guard: {reason}")
         manager = IdempotencyManager(self._storage)
         if idempotency_key is not None and manager.is_active(idempotency_key):
             raise ValueError(f"idempotency key already active: {idempotency_key}")
@@ -204,6 +208,8 @@ class RetryQueue:
             response_status=response_status,
             duration_ms=duration_ms,
             error=error,
+            delivery_id=item.get("delivery_id"),
+            endpoint_id=item.get("endpoint_id"),
         )
 
     @staticmethod

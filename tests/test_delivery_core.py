@@ -614,11 +614,19 @@ class TestDeliveryTrackerBehavioral:
         with pytest.raises(ValueError):
             tracker.transition(delivery_id, "failed")
 
-    def test_transition_pending_to_in_dlq_raises(self, storage):
+    def test_transition_pending_to_in_dlq_allowed(self, storage):
+        """pending->in-dlq is a valid edge (retry queue handoff to DLQ)."""
         tracker = DeliveryTracker(storage)
         delivery_id = tracker.create(request_id="req-1", endpoint_id="ep-1")
-        with pytest.raises(ValueError):
-            tracker.transition(delivery_id, "in-dlq")
+        tracker.transition(delivery_id, "in-dlq")
+        assert tracker.get_status(delivery_id) == "in-dlq"
+
+    def test_transition_pending_to_pending_allowed(self, storage):
+        """pending->pending is a valid edge (retry rescheduling)."""
+        tracker = DeliveryTracker(storage)
+        delivery_id = tracker.create(request_id="req-1", endpoint_id="ep-1")
+        tracker.transition(delivery_id, "pending")
+        assert tracker.get_status(delivery_id) == "pending"
 
     def test_transition_unknown_status_raises(self, storage):
         tracker = DeliveryTracker(storage)

@@ -60,8 +60,15 @@ class DeliveryTracker:
     """Per-delivery status state machine backed by the deliveries table."""
 
     # Allowed transitions per current status. delivered is terminal.
+    # Note: ``pending -> in-dlq`` and ``pending -> pending`` are valid edges
+    # because the retry queue (RetryQueue.record_attempt / DLQ handoff) can
+    # move a delivery straight to the dead-letter queue when retries are
+    # exhausted, and can keep a delivery in ``pending`` to schedule the next
+    # backoff attempt.  Routing these transitions through
+    # :meth:`DeliveryTracker.transition` keeps the queue and the tracker
+    # state machines consistent.
     _ALLOWED: ClassVar[dict[str, set[str]]] = {
-        DeliveryStatus.PENDING: {DeliveryStatus.DELIVERED, DeliveryStatus.FAILED},
+        DeliveryStatus.PENDING: {DeliveryStatus.DELIVERED, DeliveryStatus.FAILED, DeliveryStatus.IN_DLQ, DeliveryStatus.PENDING},
         DeliveryStatus.FAILED: {DeliveryStatus.IN_DLQ, DeliveryStatus.PENDING},
         DeliveryStatus.IN_DLQ: {DeliveryStatus.PENDING},
         DeliveryStatus.DELIVERED: set(),
