@@ -58,14 +58,11 @@ class TestValidationResultsBehavioral:
     """Call validation results storage methods with expected outcomes."""
 
     @pytest.fixture
-    def store(self):
-        """Create a fresh in-memory Storage instance."""
-        import os
-        import tempfile
-        db_path = os.path.join(tempfile.gettempdir(), "hookrelay_test_validation_results.db")
+    def store(self, tmp_path):
+        """Create a fresh Storage instance in an isolated per-test tmp dir."""
+        db_path = str(tmp_path / "validation_results.db")
         s = storage_module.Storage(db_path)
         yield s
-        os.unlink(db_path)
 
     @pytest.fixture
     def sample_validation_result(self):
