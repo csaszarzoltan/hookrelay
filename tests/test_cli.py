@@ -132,6 +132,24 @@ class TestCLIBehavioral:
         with pytest.raises(typer.Exit):
             cli.status(server="http://nonexistent.invalid:9999")
 
+    def test_behavior_status_rejects_non_http_scheme(self):
+        """status with a file:// URL is rejected by the SSRF guard before I/O."""
+        with pytest.raises(typer.Exit):
+            cli.status(server="file:///etc/passwd")
+
+    def test_behavior_status_allows_default_localhost(self, monkeypatch):
+        """Default localhost server still works: SSRF guard allows private for the local CLI."""
+        import types
+
+        fake_resp = types.SimpleNamespace(
+            read=lambda: b'{"status": "ok", "version": "1.2.3"}'
+        )
+        monkeypatch.setattr(
+            "urllib.request.urlopen", lambda *a, **k: fake_resp
+        )
+        # Must not raise: scheme valid and localhost allowed (allow_private).
+        cli.status()
+
     def test_behavior_listen_with_invalid_server(self):
         """listen with unreachable server should raise typer.Exit."""
         with pytest.raises(typer.Exit):

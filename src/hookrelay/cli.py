@@ -7,10 +7,12 @@ import os
 import tempfile
 import urllib.request
 from pathlib import Path
+from urllib.parse import urlparse
 
 import typer
 
 from hookrelay import _storage
+from hookrelay.ssrf import validate_target_url
 from hookrelay.storage import Storage
 
 app = typer.Typer(
@@ -153,6 +155,22 @@ def status(server: str = "http://localhost:8000") -> None:
     Usage: hookrelay status [--server URL]
     """
     health_url = f"{server.rstrip('/')}/health"
+    # SSRF guard before any network I/O. The CLI is user-invoked against a
+    # (usually local) relay, so private targets stay allowed (allow_private)
+    # — the chokepoint still rejects non-http(s) schemes, malformed URLs,
+    # and system ports, the same way EndpointConfig.validate does.
+    parsed = urlparse(health_url)
+    if parsed.scheme not in ("http", "https"):
+        typer.echo(
+            f"Error: unsupported URL scheme '{parsed.scheme}' "
+            "(only http/https allowed)",
+            err=True,
+        )
+        raise typer.Exit(code=1)
+    is_valid, reason = validate_target_url(health_url, allow_private=True)
+    if not is_valid:
+        typer.echo(f"Error: invalid server URL: {reason}", err=True)
+        raise typer.Exit(code=1)
     try:
         resp = urllib.request.urlopen(health_url, timeout=10)
         data = json.loads(resp.read().decode())

@@ -987,19 +987,31 @@ class Storage:
         self._init_filter_tables()
         if not updates:
             return False
+        # Column allowlist — mirrors schemas.py's allowed_fields. Only
+        # known columns may appear in the SET clause; any other key is
+        # dropped so attacker-controlled input can never reach the SQL.
+        allowed_fields = {
+            "name", "channel", "enabled", "priority", "condition",
+            "target_endpoint", "max_forward_count", "fallback",
+        }
         # Map boolean fields to integers for SQLite
         field_map: dict[str, Any] = {}
         for k, v in updates.items():
+            if k not in allowed_fields:
+                continue
             if k in ("enabled", "fallback"):
                 field_map[k] = 1 if v else 0
             else:
                 field_map[k] = v
+        if not field_map:
+            return False
         field_map["updated_at"] = datetime.now(UTC).isoformat()
 
         set_clause = ", ".join(f"{k} = ?" for k in field_map)
         values = list(field_map.values()) + [rule_id]
         cur = self._conn.execute(
-            f"UPDATE routing_rules SET {set_clause} WHERE rule_id = ?",
+            "UPDATE routing_rules SET " + set_clause
+            + " WHERE rule_id = ?",
             values,
         )
         self._conn.commit()

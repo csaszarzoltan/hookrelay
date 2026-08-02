@@ -8,10 +8,7 @@ from __future__ import annotations
 
 import inspect
 
-import pytest
-
 from hookrelay.storage import Storage
-
 
 # ============================================================
 # Interface tests — FilterSet CRUD
@@ -255,9 +252,48 @@ class TestRoutingRuleStorageBehavioral:
         )
         assert result is True
         rules = store.list_routing_rules(channel="test")
-        updated = [r for r in rules if r["rule_id"] == rule_id][0]
+        updated = next(
+            r for r in rules if r["rule_id"] == rule_id
+        )
         assert updated["priority"] == 50
         assert updated["enabled"] is False
+
+    def test_behavior_update_routing_rule_drops_unknown_keys(self):
+        """Unknown/malicious keys are never interpolated into the SET clause."""
+        store = self._make_store()
+        rule_id = store.save_routing_rule(
+            name="Original", channel="test", priority=100
+        )
+        result = store.update_routing_rule(
+            rule_id,
+            {"priority": 5, "rule_id = 'x' --": "evil"},
+        )
+        assert result is True
+        rules = store.list_routing_rules(channel="test")
+        updated = next(
+            r for r in rules if r["rule_id"] == rule_id
+        )
+        # Valid field applied; malicious key dropped without corrupting SQL.
+        assert updated["priority"] == 5
+        assert updated["rule_id"] == rule_id
+        assert updated["name"] == "Original"
+
+    def test_behavior_update_routing_rule_only_unknown_keys_is_noop(self):
+        """Updates containing only non-allowlisted keys change nothing."""
+        store = self._make_store()
+        rule_id = store.save_routing_rule(
+            name="Original", channel="test", priority=100
+        )
+        result = store.update_routing_rule(
+            rule_id, {"rule_id = 'x' --": "evil"}
+        )
+        assert result is False
+        rules = store.list_routing_rules(channel="test")
+        updated = next(
+            r for r in rules if r["rule_id"] == rule_id
+        )
+        assert updated["priority"] == 100
+        assert updated["name"] == "Original"
 
     def test_behavior_delete_routing_rule_returns_true(self):
         store = self._make_store()
