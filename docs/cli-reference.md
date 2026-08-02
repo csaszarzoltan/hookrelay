@@ -138,6 +138,24 @@ hookrelay status
 hookrelay status --server https://relay.example.com
 ```
 
+## `hookrelay delivery`
+
+Inspect outbound deliveries (see `docs/api-reference-1.5.md`):
+
+```bash
+hookrelay delivery list [--status STATUS] [--endpoint-id ID] [--limit N]
+hookrelay delivery status <delivery_id>
+```
+
+## `hookrelay dlq`
+
+Inspect and requeue dead-letter entries:
+
+```bash
+hookrelay dlq list [--endpoint-id ID] [--limit N]
+hookrelay dlq requeue <entry_id>
+```
+
 
 ## Authentication environment variable
 

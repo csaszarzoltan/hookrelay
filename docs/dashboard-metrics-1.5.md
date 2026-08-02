@@ -96,9 +96,13 @@ summary keys: ['by_status', 'endpoints', 'p50_ms', 'p95_ms', 'p99_ms', 'success_
 
 ## Notes
 
-- These analyzers are a **library surface** (T3) — they compose dashboard
-  payloads for UI/API use. No dedicated REST endpoints are exposed for them
-  in v1.5.0; call them in-process where the dashboard is served.
+- These analyzers are a **library surface** (T3) that compose dashboard
+  payloads for UI/API use. v1.5.0 ships a REST surface on top of them:
+  `GET /api/dashboard/metrics` returns `{summary, time_series,
+  endpoint_breakdown}` (Bearer-token protected when `HOOKRELAY_API_TOKEN` is
+  set), and the Live Feed dashboard page renders the summary strip
+  server-side. See `docs/api-reference-1.5.md` for the full delivery / DLQ /
+  metrics REST contract.
 - Latency percentiles are nearest-rank, matching the tests
   (`p50` of `[10, 20, 30]` is `20`).
 - The success-rate window is a rolling `created_at >= now - window` filter.

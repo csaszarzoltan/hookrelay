@@ -561,6 +561,140 @@ def data_verify_audit(
 
 
 # ============================================================
+# Delivery & DLQ commands
+# ============================================================
+
+
+def delivery_list(
+    status: str | None = None,
+    endpoint_id: str | None = None,
+    limit: int = 20,
+) -> None:
+    """Show outbound deliveries, optionally filtered by status/endpoint.
+
+    Usage: hookrelay delivery list [--status STATUS] [--endpoint-id ID] [--limit N]
+    """
+    from hookrelay.delivery import DeliveryStatus
+    from hookrelay.delivery.tracker import DeliveryTracker
+
+    if status is not None and status not in DeliveryStatus.ALL:
+        typer.echo(f"Error: status must be one of {', '.join(DeliveryStatus.ALL)}", err=True)
+        raise typer.Exit(code=1)
+    store = _get_storage()
+    rows = DeliveryTracker(store).list(
+        status=status, endpoint_id=endpoint_id, limit=limit
+    )
+    if not rows:
+        typer.echo("No deliveries found.")
+        return
+    for item in rows:
+        ts = (item.get("created_at") or "")[:19]
+        status_str = item.get("status", "?")
+        typer.echo(
+            f"{ts} {status_str:10s} {item.get('endpoint_id',''):20s} "
+            f"{item.get('delivery_id','')[:12]}  {item.get('target_url','')}"
+        )
+
+
+def delivery_status(delivery_id: str) -> None:
+    """Show one delivery record (including current status).
+
+    Usage: hookrelay delivery status <delivery_id>
+    """
+    from hookrelay.delivery import RetryQueue
+
+    store = _get_storage()
+    item = RetryQueue(store).get(delivery_id)
+    if item is None:
+        typer.echo(f"Delivery {delivery_id} not found.", err=True)
+        raise typer.Exit(code=1)
+    typer.echo(json.dumps(item, indent=2, default=str))
+
+
+def dlq_list(endpoint_id: str | None = None, limit: int = 20) -> None:
+    """Show dead-letter queue entries.
+
+    Usage: hookrelay dlq list [--endpoint-id ID] [--limit N]
+    """
+    from hookrelay.delivery import DeadLetterQueue
+
+    store = _get_storage()
+    entries = DeadLetterQueue(store).list_entries(limit=limit, endpoint_id=endpoint_id)
+    if not entries:
+        typer.echo("No dead-letter entries.")
+        return
+    for entry in entries:
+        ts = (entry.get("dead_lettered_at") or "")[:19]
+        typer.echo(
+            f"{ts} {entry.get('endpoint_id',''):20s} "
+            f"{entry.get('delivery_id','')[:12]}  {entry.get('reason','')}"
+        )
+
+
+def dlq_requeue(entry_id: str) -> None:
+    """Move a dead-letter entry back to the pending delivery queue.
+
+    Usage: hookrelay dlq requeue <entry_id>
+    """
+    from hookrelay.delivery import DeadLetterQueue
+
+    store = _get_storage()
+    try:
+        delivery_id = DeadLetterQueue(store).requeue(entry_id)
+    except KeyError as e:
+        typer.echo(f"Error: {e}", err=True)
+        raise typer.Exit(code=1)
+    typer.echo(f"Requeued {entry_id}: delivery {delivery_id} is pending again.")
+
+
+delivery_app = typer.Typer(
+    name="delivery",
+    help="Inspect and manage outbound deliveries.",
+    no_args_is_help=True,
+)
+app.add_typer(delivery_app, name="delivery")
+
+
+@delivery_app.command("list")
+def _delivery_list_cmd(
+    status: str | None = typer.Option(None, "--status", "-s", help="Filter by delivery status"),
+    endpoint_id: str | None = typer.Option(None, "--endpoint-id", "-e", help="Filter by endpoint"),
+    limit: int = typer.Option(20, "--limit", "-n", help="Max results"),
+):
+    delivery_list(status=status, endpoint_id=endpoint_id, limit=limit)
+
+
+@delivery_app.command("status")
+def _delivery_status_cmd(
+    delivery_id: str = typer.Argument(..., help="Delivery ID"),
+):
+    delivery_status(delivery_id=delivery_id)
+
+
+dlq_app = typer.Typer(
+    name="dlq",
+    help="Inspect and requeue dead-letter entries.",
+    no_args_is_help=True,
+)
+app.add_typer(dlq_app, name="dlq")
+
+
+@dlq_app.command("list")
+def _dlq_list_cmd(
+    endpoint_id: str | None = typer.Option(None, "--endpoint-id", "-e", help="Filter by endpoint"),
+    limit: int = typer.Option(20, "--limit", "-n", help="Max results"),
+):
+    dlq_list(endpoint_id=endpoint_id, limit=limit)
+
+
+@dlq_app.command("requeue")
+def _dlq_requeue_cmd(
+    entry_id: str = typer.Argument(..., help="DLQ entry ID"),
+):
+    dlq_requeue(entry_id=entry_id)
+
+
+# ============================================================
 # Serve command
 # ============================================================
 

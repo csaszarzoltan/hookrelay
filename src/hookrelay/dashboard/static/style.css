@@ -496,3 +496,9 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
 .backup-card-header p { color: var(--text-secondary); margin-top: 4px; }
 .backup-preview { max-height: 360px; overflow: auto; margin-top: 14px; padding: 14px; background: var(--bg-primary); border: 1px solid var(--border); border-radius: var(--radius); white-space: pre-wrap; overflow-wrap: anywhere; }
 .backup-encryption { color: var(--warning); margin: 10px 0 0; font-size: .9rem; }
+
+/* v1.5 delivery metrics strip */
+.metrics-strip { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 12px; margin-bottom: 20px; }
+.metric-card { background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius); padding: 16px; display: grid; gap: 4px; }
+.metric-label { color: var(--text-secondary); font-size: .82rem; }
+.metric-value { font-size: 1.45rem; font-weight: 700; }

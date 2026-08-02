@@ -141,6 +141,25 @@ class _ValidateRequest(BaseModel):
     draft: str = "2020-12"
 
 
+class _EnqueueDeliveryRequest(BaseModel):
+    request_id: str
+    endpoint_id: str
+    target_url: str
+    method: str = "POST"
+    headers: dict[str, str] = {}
+    body: str | None = None
+    idempotency_key: str | None = None
+    policy: dict | None = None
+    delivery_id: str | None = None
+
+
+class _RecordAttemptRequest(BaseModel):
+    success: bool
+    response_status: int | None = None
+    duration_ms: float | None = None
+    error: str | None = None
+
+
 def _register_schema_api_routes(app: FastAPI) -> None:
     """Register /api/v1/schemas and /api/v1/validate endpoints."""
     from fastapi import HTTPException
@@ -220,6 +239,146 @@ def _register_schema_api_routes(app: FastAPI) -> None:
             return result.to_dict()
         except ValueError as e:
             raise HTTPException(status_code=422, detail=str(e))
+
+
+def _register_delivery_api_routes(app: FastAPI) -> None:
+    """Register /api/deliveries, /api/dlq, and /api/dashboard/metrics.
+
+    Exposes the v1.5 delivery infrastructure (RetryQueue / DeadLetterQueue /
+    DeliveryTracker / DashboardService) as a REST surface. Enqueue keeps the
+    SSRF guard and idempotency checks that RetryQueue.enqueue already enforces.
+    """
+
+    from fastapi import HTTPException
+
+    from hookrelay.config.retry_policy import RetryPolicy
+    from hookrelay.dashboard.service import DashboardService
+    from hookrelay.delivery import DeadLetterQueue, DeliveryStatus, RetryQueue
+    from hookrelay.delivery.tracker import DeliveryTracker
+
+    def _delivery_or_404(store, delivery_id: str) -> dict:
+        item = RetryQueue(store).get(delivery_id)
+        if item is None:
+            raise HTTPException(status_code=404, detail=f"Delivery {delivery_id} not found")
+        return item
+
+    def _normalize_delivery(row: dict) -> dict:
+        """Parse JSON-text columns (headers/policy) back into dicts."""
+        item = dict(row)
+        for column in ("headers", "policy"):
+            raw = item.get(column)
+            if isinstance(raw, str):
+                try:
+                    item[column] = json.loads(raw)
+                except ValueError:
+                    pass
+        return item
+
+    @app.get("/api/deliveries")
+    async def api_list_deliveries(
+        status: str | None = None,
+        endpoint_id: str | None = None,
+        limit: int = 100,
+    ):
+        store = _get_or_create_storage()
+        if status is not None and status not in DeliveryStatus.ALL:
+            raise HTTPException(
+                status_code=422,
+                detail=f"status must be one of {', '.join(DeliveryStatus.ALL)}",
+            )
+        limit = max(1, min(limit, 1000))
+        rows = DeliveryTracker(store).list(
+            status=status, endpoint_id=endpoint_id, limit=limit
+        )
+        # Tracker rows carry headers/policy as JSON text; normalize to dicts
+        # the same way RetryQueue.get() does.
+        return [_normalize_delivery(row) for row in rows]
+
+    @app.post("/api/deliveries", status_code=201)
+    async def api_enqueue_delivery(req: _EnqueueDeliveryRequest, request: Request):
+        store = _get_or_create_storage()
+        from uuid import uuid4
+
+        policy = RetryPolicy.from_dict(req.policy) if req.policy else None
+        body_bytes = req.body.encode("utf-8") if req.body is not None else None
+        delivery_id = req.delivery_id or uuid4().hex
+        try:
+            delivery_id = RetryQueue(store).enqueue(
+                delivery_id=delivery_id,
+                request_id=req.request_id,
+                endpoint_id=req.endpoint_id,
+                target_url=req.target_url,
+                method=req.method,
+                headers=req.headers,
+                body=body_bytes,
+                idempotency_key=req.idempotency_key,
+                policy=policy,
+            )
+        except ValueError as e:
+            raise HTTPException(status_code=422, detail=str(e))
+        store.record_audit_event(
+            "delivery.enqueue", request_actor(request), "delivery", delivery_id,
+            "success", details={"endpoint_id": req.endpoint_id, "request_id": req.request_id},
+        )
+        return _delivery_or_404(store, delivery_id)
+
+    @app.post("/api/deliveries/{delivery_id}/attempts")
+    async def api_record_attempt(delivery_id: str, req: _RecordAttemptRequest, request: Request):
+        store = _get_or_create_storage()
+        _delivery_or_404(store, delivery_id)
+        new_status = RetryQueue(store).record_attempt(
+            delivery_id,
+            success=req.success,
+            response_status=req.response_status,
+            duration_ms=req.duration_ms,
+            error=req.error,
+        )
+        store.record_audit_event(
+            "delivery.attempt", request_actor(request), "delivery", delivery_id,
+            "success" if req.success else "failure",
+            details={"status": new_status},
+        )
+        return _delivery_or_404(store, delivery_id)
+
+    @app.get("/api/dlq")
+    async def api_list_dlq(endpoint_id: str | None = None, limit: int = 100):
+        store = _get_or_create_storage()
+        limit = max(1, min(limit, 1000))
+        return DeadLetterQueue(store).list_entries(limit=limit, endpoint_id=endpoint_id)
+
+    @app.post("/api/dlq/{entry_id}/requeue")
+    async def api_requeue_dlq(entry_id: str, request: Request):
+        store = _get_or_create_storage()
+        try:
+            delivery_id = DeadLetterQueue(store).requeue(entry_id)
+        except KeyError as e:
+            raise HTTPException(status_code=404, detail=str(e))
+        store.record_audit_event(
+            "dlq.requeue", request_actor(request), "delivery", delivery_id,
+            "success", details={"dlq_entry": entry_id},
+        )
+        return {"delivery_id": delivery_id, "status": "pending"}
+
+    @app.get("/api/dashboard/metrics")
+    async def api_dashboard_metrics(
+        window_minutes: int = 60,
+        bucket_minutes: int = 5,
+    ):
+        if window_minutes < 1 or window_minutes > 1440:
+            raise HTTPException(status_code=422, detail="window_minutes must be in [1, 1440]")
+        if bucket_minutes < 1 or bucket_minutes > window_minutes:
+            raise HTTPException(status_code=422, detail="bucket_minutes must be in [1, window_minutes]")
+        store = _get_or_create_storage()
+        service = DashboardService(store)
+        return {
+            "summary": service.summary(window_minutes=window_minutes),
+            "time_series": service.time_series(
+                window_minutes=window_minutes, bucket_minutes=bucket_minutes
+            ),
+            "endpoint_breakdown": service.endpoint_breakdown(
+                window_minutes=window_minutes
+            ),
+        }
 
 
 def _register_webhook_route(app: FastAPI) -> None:
@@ -449,6 +608,9 @@ def create_app() -> FastAPI:
 
     # Register schema API routes
     _register_schema_api_routes(app)
+
+    # Register delivery / DLQ / dashboard-metrics API routes
+    _register_delivery_api_routes(app)
 
 
     @app.get("/api/settings/retention")

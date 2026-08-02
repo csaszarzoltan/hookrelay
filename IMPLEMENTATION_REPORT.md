@@ -509,3 +509,64 @@ The manifest remains plaintext for operational discovery. The database bytes are
 - New encrypted-backup tests: **6 passed**
 - Full regression: **514 passed, 0 failed**
 - Ruff: source and release-specific tests pass
+
+---
+
+# Hookrelay 1.5.0 REST/CLI surface for delivery, DLQ, and dashboard metrics
+
+## Product rationale
+
+v1.5.0 shipped the delivery infrastructure (RetryQueue, DeadLetterQueue,
+idempotency, tracking) and dashboard metrics analyzers as a library surface
+only: no REST endpoints or CLI commands exposed them, so the changelog claims
+("team dashboard metrics", retry/DLQ operations) were not reachable from a
+running server. This continuation adds the operational surface.
+
+## Implemented
+
+### REST endpoints (protected by the existing HOOKRELAY_API_TOKEN middleware)
+
+- `GET /api/deliveries?status=&endpoint_id=&limit=` — list deliveries (newest
+  first, status validated against the canonical vocabulary)
+- `POST /api/deliveries` — enqueue; keeps the SSRF guard and idempotency-key
+  dedup that `RetryQueue.enqueue` already enforces (422 on violations)
+- `POST /api/deliveries/{id}/attempts` — record an attempt and let the
+  state machine transition (404 for unknown deliveries)
+- `GET /api/dlq?endpoint_id=&limit=` — list dead-letter entries
+- `POST /api/dlq/{entry_id}/requeue` — requeue to pending (404 for unknown)
+- `GET /api/dashboard/metrics?window_minutes=&bucket_minutes=` — composed
+  `DashboardService.summary` + `time_series` + `endpoint_breakdown`
+
+All mutating endpoints record audit events (`delivery.enqueue`,
+`delivery.attempt`, `dlq.requeue`).
+
+### Dashboard UI wiring
+
+The Live Feed page now renders a `.metrics-strip` summary server-side from
+`DashboardService.summary()` when delivery data exists, so the "team
+dashboard metrics" claim is reachable in the UI, not just the library.
+
+### CLI commands
+
+- `hookrelay delivery list [--status] [--endpoint-id] [--limit]`
+- `hookrelay delivery status <delivery_id>`
+- `hookrelay dlq list [--endpoint-id] [--limit]`
+- `hookrelay dlq requeue <entry_id>`
+
+## Key files
+
+- `src/hookrelay/server.py` — `_register_delivery_api_routes()` + request models
+- `src/hookrelay/cli.py` — `delivery_app` / `dlq_app` sub-typers
+- `src/hookrelay/dashboard/__init__.py` — metrics strip context on the index page
+- `src/hookrelay/dashboard/templates/index.html`, `static/style.css`
+- `tests/test_delivery_api.py`, `tests/test_delivery_cli.py`
+- `docs/api-reference-1.5.md` — full REST + CLI contract
+- `CHANGELOG.md`, `docs/cli-reference.md`, `docs/dashboard-metrics-1.5.md`
+
+## Validation
+
+- New API/CLI/UI tests: **38 passed** (28 REST + auth, 10 CLI)
+- Full regression: **773 passed, 0 failed** (735 baseline at this commit + 38 new)
+- Ruff: all touched source and tests clean
+- Live CLI smoke test: `delivery list|status` and `dlq list|requeue` verified
+  end-to-end against the default storage

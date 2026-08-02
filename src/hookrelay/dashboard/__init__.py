@@ -60,9 +60,21 @@ def create_dashboard_router() -> APIRouter:
         store = _storage.get()
         recent_requests = store.list_requests(limit=10) if store else []
         total_count = store.count_requests() if store else 0
+        metrics = None
+        if store is not None:
+            try:
+                from hookrelay.dashboard.service import DashboardService
+
+                metrics = DashboardService(store).summary()
+            except Exception:
+                metrics = None
         return templates.TemplateResponse(
             request, "index.html",
-            {"recent_requests": recent_requests, "total_count": total_count},
+            {
+                "recent_requests": recent_requests,
+                "total_count": total_count,
+                "metrics": metrics,
+            },
         )
 
     @router.get("/dashboard/history", response_class=HTMLResponse)

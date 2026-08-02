@@ -10,6 +10,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Features
 
 - **Production Delivery Infrastructure** — persistent `RetryQueue` with idempotency dedup and exponential backoff (capped, jittered), `DeadLetterQueue` with failure metadata and requeue, `DeliveryTracker`/`DeliveryStatus` state machine (pending → delivered | failed → in-dlq | pending), and `IdempotencyManager` with TTL-based key registry; new `deliveries`, `dlq`, `idempotency_keys` tables created idempotently
+- **REST API + CLI for Delivery & DLQ** — `GET/POST /api/deliveries`, `POST /api/deliveries/{id}/attempts`, `GET /api/dlq`, `POST /api/dlq/{entry_id}/requeue` (SSRF guard + idempotency preserved on enqueue), plus `hookrelay delivery list|status` and `hookrelay dlq list|requeue` CLI subcommands
+- **Dashboard Metrics API & UI wiring** — `GET /api/dashboard/metrics` returns `{summary, time_series, endpoint_breakdown}` from `DashboardService`, and the Live Feed page renders a summary metrics strip server-side
 - **HMAC Verification & Per-Endpoint Configuration** — Svix-style `HMACVerifier` (`t=,v1=` signatures, constant-time compare, timestamp tolerance, key rotation), `RetryPolicy` (frozen dataclass with capped exponential backoff and jitter), `EndpointConfig` (timeout/retries/headers/secret with `validate()`), `HeaderManager` (allowlist + injected headers, case-insensitive sensitive-header redaction)
 - **Team Dashboard Metrics** — `MetricsCollector` (count by status/endpoint, zero-filled time series), `LatencyTracker` (nearest-rank p50/p95/p99 + average with endpoint filter and sliding window), `SuccessRateCalculator` (delivered/(delivered+failed), overall + per-endpoint), `DashboardService` summary payload
 - **Data Resilience, Governance & Encryption** — HMAC-SHA256 audit hash chain for tamper evidence, SQLite backup/restore with atomic rollback and checksums, AES-256-GCM encrypted recovery points, protected backup/health endpoints, Backup Center with storage health monitoring and automated backup policy controls
@@ -28,9 +30,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Tests
 
-- 731 tests passing (728 at approval + 3 new regression tests), 0 failed, 0 skipped
+- 773 tests passing (735 at this commit + 38 new API/CLI/UI-wiring tests), 0 failed, 0 skipped
 - 213 new tests across delivery core (83), security/config (80), dashboard (50); 514 existing tests, zero regressions
 - 3 regression tests pinning R1 SSRF chokepoints (config + enqueue) and R3 fan-out latency attribution under a shared `request_id`
+- 38 new API/CLI/UI-wiring tests in `tests/test_delivery_api.py` and `tests/test_delivery_cli.py` (deliveries list/enqueue/attempts, dlq list/requeue, dashboard metrics, auth coverage, CLI subcommands)
 - Ruff clean on all touched files (repo-wide pre-existing lint in examples/ unchanged)
 
 ### Docs
@@ -39,6 +42,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `docs/backup-center-1.4.md` — backup/restore, encryption, and storage health guide
 - `docs/delivery-infrastructure-1.5.md` — retry queue, delivery tracking, and retry policy guide
 - `docs/dead-letter-queue-1.5.md` — DLQ inspect/requeue guide
+- `docs/api-reference-1.5.md` — REST + CLI contract for delivery, DLQ, and dashboard metrics
 - `docs/idempotency-1.5.md` — TTL-based idempotency dedup guide
 - `docs/hmac-verification-1.5.md` — Svix-style HMAC signature verification guide
 - `docs/endpoint-config-1.5.md` — per-endpoint configuration and header management guide
