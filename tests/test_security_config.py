@@ -464,6 +464,13 @@ class TestEndpointConfigBehavioral:
         with pytest.raises(ValueError):
             _make_endpoint(url="not-a-url").validate()
 
+    def test_validate_rejects_private_ip_url(self):
+        # R1 regression: the config chokepoint must reject private/loopback
+        # URLs (SSRF vector) while still accepting public ones.
+        with pytest.raises(ValueError):
+            _make_endpoint(url="http://127.0.0.1:8080/hook").validate()
+        assert _make_endpoint(url="https://example.com/hook").validate() is None
+
     def test_validate_rejects_empty_url(self):
         with pytest.raises(ValueError):
             _make_endpoint(url="").validate()

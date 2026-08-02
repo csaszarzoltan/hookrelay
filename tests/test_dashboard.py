@@ -518,6 +518,33 @@ class TestLatencyTrackerBehavior:
         assert tracker.percentile(50.0, endpoint_id="ep-1") == 50.0
         assert tracker.percentile(50.0, endpoint_id="ep-2") == 250.0
 
+    def test_percentile_attribution_under_fanout_shared_request_id(self, storage):
+        # R3 regression: fan-out produces MULTIPLE deliveries sharing ONE
+        # request_id but with distinct endpoint_ids/durations. Latency must be
+        # attributed per delivery_id (unique per delivery), not per request_id.
+        # The old join (`JOIN deliveries d ON d.request_id = da.request_id`)
+        # pooled ep-1's 10ms with ep-2's 200ms and reported 10.0 for ep-2.
+        _seed_event(
+            storage,
+            delivery_id="d-fan-1",
+            request_id="req-fanout",
+            endpoint_id="ep-1",
+            status="delivered",
+            duration_ms=10.0,
+        )
+        _seed_event(
+            storage,
+            delivery_id="d-fan-2",
+            request_id="req-fanout",
+            endpoint_id="ep-2",
+            status="delivered",
+            duration_ms=200.0,
+        )
+
+        tracker = latency_mod.LatencyTracker(storage)
+        assert tracker.percentile(50.0, endpoint_id="ep-1") == 10.0
+        assert tracker.percentile(50.0, endpoint_id="ep-2") == 200.0
+
     def test_percentile_filters_by_window(self, storage):
         now = datetime.now(UTC)
         # Recent: durations [100, 200, 300]; old: [1, 2, 3]

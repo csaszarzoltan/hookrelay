@@ -431,6 +431,18 @@ class TestRetryQueueBehavioral:
                 **_delivery_kwargs(delivery_id="dlv-0002", idempotency_key="idem-1")
             )
 
+    def test_enqueue_ssrf_chokepoint(self, storage):
+        # R1 regression: the enqueue chokepoint must reject link-local SSRF
+        # targets (cloud metadata endpoint) while still accepting public ones.
+        queue = RetryQueue(storage)
+        with pytest.raises(ValueError):
+            queue.enqueue(
+                **_delivery_kwargs(
+                    target_url="http://169.254.169.254/latest/meta-data/"
+                )
+            )
+        assert queue.enqueue(**_delivery_kwargs()) == "dlv-0001"
+
     def test_dequeue_due_returns_due_deliveries(self, storage):
         queue = RetryQueue(storage)
         queue.enqueue(**_delivery_kwargs())
