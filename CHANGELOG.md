@@ -5,6 +5,43 @@ All notable changes to **hookrelay** are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.0] — 2026-08-02
+
+### Features
+
+- **Production Delivery Infrastructure** — persistent `RetryQueue` with idempotency dedup and exponential backoff (capped, jittered), `DeadLetterQueue` with failure metadata and requeue, `DeliveryTracker`/`DeliveryStatus` state machine (pending → delivered | failed → in-dlq | pending), and `IdempotencyManager` with TTL-based key registry; new `deliveries`, `dlq`, `idempotency_keys` tables created idempotently
+- **HMAC Verification & Per-Endpoint Configuration** — Svix-style `HMACVerifier` (`t=,v1=` signatures, constant-time compare, timestamp tolerance, key rotation), `RetryPolicy` (frozen dataclass with capped exponential backoff and jitter), `EndpointConfig` (timeout/retries/headers/secret with `validate()`), `HeaderManager` (allowlist + injected headers, case-insensitive sensitive-header redaction)
+- **Team Dashboard Metrics** — `MetricsCollector` (count by status/endpoint, zero-filled time series), `LatencyTracker` (nearest-rank p50/p95/p99 + average with endpoint filter and sliding window), `SuccessRateCalculator` (delivered/(delivered+failed), overall + per-endpoint), `DashboardService` summary payload
+- **Data Resilience, Governance & Encryption** — HMAC-SHA256 audit hash chain for tamper evidence, SQLite backup/restore with atomic rollback and checksums, AES-256-GCM encrypted recovery points, protected backup/health endpoints, Backup Center with storage health monitoring and automated backup policy controls
+- **Versioned Data APIs & Reliability (v1.0.0)** — versioned event envelopes with monotonic cursors, explicit schema migrations with audit logging, connection registry with heartbeat/stale detection, incremental live updates with exponential-backoff WebSocket reconnection, full-text search, combinable filters, named saved views
+- **Authentication & Response Diagnostics** — token-based dashboard/WebSocket auth via `HOOKRELAY_API_TOKEN`, settings page for configurable request retention, response inspector (status/headers/body), client-side delivery reporting with redacted sensitive headers
+- **Delivery Lifecycle Tracking & Saved Views** — delivery attempt tracking (status/duration/errors), persistent saved request views, full-text search across payloads/headers/paths, delivery timeline visualization, request deletion with diagnostic cleanup
+- **Dashboard UX, Resilience & Security** — resilient WebSocket reconnection with live updates, advanced history filtering (method/path/validation status), sensitive header redaction, ARIA accessibility, pause-live-updates, `.invalid` hostname forwarding guard, deterministic URI/date-time format checkers
+
+### Fixes
+
+- **SSRF guard at both chokepoints (R1)** — `EndpointConfig.validate()` and `RetryQueue.enqueue()` enforce the shared `hookrelay.ssrf.validate_target_url` guard (private/loopback/metadata targets rejected)
+- **State-machine reconciliation (R2)** — `DeliveryTracker` allows `pending → {in-dlq, pending}` to agree with `RetryQueue.record_attempt` / DLQ handoff edges
+- **Fan-out attribution (R3)** — dashboard latency joins `delivery_attempts → deliveries` on `delivery_id` (unique per delivery) instead of `request_id` (1:N under fan-out)
+- **v4 reopen regression** — `_ensure_delivery_attempt_columns()` now runs before `_init_schema()` so the v5 index never hits a pre-existing v4 table; schema v4→v5 is a no-op
+- **Hermetic test fixtures** — `test_schemas.py` uses `tmp_path` (no `/tmp` pollution)
+
+### Tests
+
+- 731 tests passing (728 at approval + 3 new regression tests), 0 failed, 0 skipped
+- 213 new tests across delivery core (83), security/config (80), dashboard (50); 514 existing tests, zero regressions
+- 3 regression tests pinning R1 SSRF chokepoints (config + enqueue) and R3 fan-out latency attribution under a shared `request_id`
+- Ruff clean on all touched files (repo-wide pre-existing lint in examples/ unchanged)
+
+### Docs
+
+- `docs/data-requirements-1.0.md` — versioned data contracts and reliability requirements
+- `docs/backup-center-1.4.md` — backup/restore, encryption, and storage health guide
+- `docs/product-ux-requirements-report.md` / `-0.9.md` — UX requirements reports
+- `docs/dashboard-guide.md`, `docs/cli-reference.md`, `docs/getting-started.md` — updated for auth, retention, delivery, and data commands
+- `IMPLEMENTATION_REPORT.md` — per-release implementation notes
+- `scripts/repro_v4_reopen.py` — reproduction script proving clean v4 DB reopen
+
 ## [0.4.0] — 2026-07-29
 
 ### Features
