@@ -17,7 +17,8 @@ External Webhook → Relay Server ──→ WebSocket Tunnel → hookrelay CLI �
                                         ├── Live Feed (WebSocket)
                                         ├── History Browser (filter/search)
                                         ├── Payload Inspector
-                                        └── Request Replay
+                                        ├── Request Replay
+                                        └── Bins (capture endpoints + live feed)
 ```
 
 ## Prerequisites
@@ -66,7 +67,7 @@ curl http://localhost:8000/health
 Returns:
 
 ```json
-{"status": "ok", "version": "1.5.0"}
+{"status": "ok", "version": "1.6.0"}
 ```
 
 ## Forwarding Webhooks
@@ -89,6 +90,7 @@ Open **http://localhost:8000/dashboard/** in your browser:
 - **History Browser** — paginated, filterable list with search support
 - **Payload Inspector** — detailed view of headers, query params, and body
 - **Request Replay** — one-click replay from the dashboard UI
+- **Bins** — create capture bins, copy their URLs, and watch a live request feed
 
 ![Dashboard](screenshots/dashboard.png)
 *Figure: Hookrelay Web Dashboard — Live Feed view*
@@ -115,6 +117,28 @@ Replay a request:
 hookrelay replay abc123
 hookrelay replay abc123 --target http://localhost:9000/retry
 ```
+
+## Capture webhooks with a bin (v1.6.0+)
+
+Create a persistent test endpoint that captures every request sent to it —
+even when no client is connected — then forward any captured request:
+
+```bash
+hookrelay bin create --description "stripe tests"
+#   Bin created: http://localhost:8000/bin/<bin_id>
+
+curl -X POST "http://localhost:8000/bin/<bin_id>?src=stripe" \
+     -H "Content-Type: application/json" -d '{"event": "invoice.paid"}'
+
+hookrelay bin inspect <bin_id>                 # list captured requests
+hookrelay bin forward <request-id> --to https://example.com/webhook
+```
+
+The `/bin/{bin_id}` capture endpoint is public (no auth), accepts
+GET/POST/PUT/PATCH/DELETE, and persists even with no WebSocket client
+connected. Forwarding is SSRF-guarded and runs off the event loop. The full
+reference — REST API, SSRF behaviour, Python API, dashboard Bins view — is in
+the [capture bins guide](capture-bins-1.6.md).
 
 ## Configuration
 
@@ -164,6 +188,9 @@ inbound signature verification. Start with the per-feature guides:
 - [HMAC signature verification](hmac-verification-1.5.md)
 - [Endpoint configuration](endpoint-config-1.5.md)
 - [Dashboard delivery metrics](dashboard-metrics-1.5.md)
+
+Hookrelay 1.6 adds [webhook capture bins](capture-bins-1.6.md) — persistent
+test endpoints with one-click forward/replay.
 
 Every guide pairs with a runnable example under [`../examples/`](../examples/),
 for example `python examples/hmac_verification.py`.

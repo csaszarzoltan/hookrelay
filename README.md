@@ -4,7 +4,7 @@
 
 [![GitHub Release](https://img.shields.io/github/v/release/csaszarzoltan/hookrelay?logo=github)](https://github.com/csaszarzoltan/hookrelay/releases)
 [![Python](https://img.shields.io/badge/python-3.11+-blue?logo=python)](https://python.org)
-[![Tests](https://img.shields.io/badge/tests-731%20passing-brightgreen)](https://github.com/csaszarzoltan/hookrelay/actions)
+[![Tests](https://img.shields.io/badge/tests-871%20passing-brightgreen)](https://github.com/csaszarzoltan/hookrelay/actions)
 [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 [![Dashboard](https://img.shields.io/badge/feature-dashboard-blueviolet)](#web-dashboard)
 
@@ -12,7 +12,14 @@
 
 ## Features
 
-### What is new in 1.5.0
+### What is new in 1.6.0
+
+- **Webhook capture bins** — persistent, webhook.site-style test endpoints that capture every request (method, headers, body, query params, source IP) even with no client connected; one-click forward/replay of any captured request to an SSRF-guarded target
+- **Capture bins CLI** — `hookrelay bin create|list|inspect|forward` for terminal-based bin management
+- **Bins dashboard** — `/dashboard/bins` view with bin creation, copy-URL, live request feed, and click-to-forward
+- **871 passing tests and zero failures**
+
+### Included from 1.5.0
 
 - **Production delivery infrastructure** — persistent `RetryQueue` with capped exponential backoff (optional jitter), `DeadLetterQueue` with failure metadata and requeue, `DeliveryTracker` state machine (pending → delivered | in-dlq), and TTL-based `IdempotencyManager` dedup
 - **HMAC verification & per-endpoint configuration** — Svix-style `t=,v1=` signatures with constant-time compare and timestamp tolerance; `EndpointConfig` (timeout/retries/headers/secret) validated against the SSRF guard at configuration time
@@ -91,6 +98,7 @@
 - **Webhook relay** — forward webhooks from a public endpoint to `localhost` via a WebSocket tunnel
 - **Real-time inspection** — view method, headers, body, and query params as they arrive
 - **Request replay** — replay any received webhook with one command: `hookrelay replay <id>`
+- **Capture bins (v1.6.0+)** — create persistent test endpoints and forward captured requests: `hookrelay bin create|list|inspect|forward`
 - **History browser** — search and browse webhooks with FTS5 full-text search
 - **Conditional forwarding** — filter by source IP, HTTP method, path, headers, or status code
 - **SSRF protection** — IP range blocking (IPv4/IPv6), DNS anti-rebinding, protocol whitelist
@@ -104,6 +112,7 @@
 - **Request Replay** — one-click replay from the dashboard with inline result display
 - **Live Monitoring WebSocket** — `/dashboard/ws/live` for programmatic real-time event streaming
 - **Team delivery metrics (v1.5.0+)** — read-only analyzers for counts by status/endpoint, p50/p95/p99 latency, and success rates, ready to power dashboard/API views (`hookrelay.dashboard.*`, see [dashboard metrics guide](docs/dashboard-metrics-1.5.md))
+- **Bins view (v1.6.0+)** — create capture bins, copy their public URLs, watch a live request feed, and forward captured requests with one click (see [capture bins guide](docs/capture-bins-1.6.md))
 
 ## Installation
 
@@ -164,6 +173,22 @@ hookrelay history
 
 ```bash
 hookrelay replay <request-id>
+```
+
+### 7. Capture webhooks with a bin (v1.6.0+)
+
+Create a persistent test endpoint, point a sender at it, then forward any
+captured request (see the [capture bins guide](docs/capture-bins-1.6.md)):
+
+```bash
+hookrelay bin create --description "stripe tests"
+#   → Bin created: http://localhost:8000/bin/<bin_id>
+
+curl -X POST "http://localhost:8000/bin/<bin_id>?src=stripe" \
+     -H "Content-Type: application/json" -d '{"event": "invoice.paid"}'
+
+hookrelay bin inspect <bin_id>     # list captured requests
+hookrelay bin forward <request-id> --to https://example.com/webhook
 ```
 
 ## Reliable delivery & webhook security (v1.5.0+)
@@ -251,6 +276,9 @@ hookrelay bin forward <request_id> --to https://example.com/webhook
 - Dashboard **Bins** view at `/dashboard/bins`: create a bin, copy its URL,
   watch the live request feed (same WS as `/dashboard/ws/live`), and forward
   captured requests with one click.
+- Full reference: [capture bins guide](docs/capture-bins-1.6.md) (REST +
+  SSRF behaviour + Python API) and the runnable
+  [`examples/capture_bins.py`](examples/capture_bins.py).
 
 ## CLI Commands
 
@@ -333,6 +361,7 @@ hookrelay/
 │   ├── hmac-verification-1.5.md  # HMAC signature verification guide
 │   ├── endpoint-config-1.5.md    # Per-endpoint configuration guide
 │   ├── dashboard-metrics-1.5.md  # Dashboard delivery metrics guide
+│   ├── capture-bins-1.6.md       # Webhook capture bins guide
 │   └── screenshots/              # Dashboard screenshots
 ├── examples/
 │   ├── basic_relay.py            # Local receiver + relay flow
@@ -342,7 +371,8 @@ hookrelay/
 │   ├── idempotency.py            # Idempotency key registry
 │   ├── hmac_verification.py      # Sign/verify webhook payloads
 │   ├── endpoint_config.py        # EndpointConfig + HeaderManager
-│   └── dashboard_metrics.py      # Metrics, latency, success-rate analyzers
+│   ├── dashboard_metrics.py      # Metrics, latency, success-rate analyzers
+│   └── capture_bins.py           # Webhook capture bins walkthrough
 ├── CHANGELOG.md
 └── pyproject.toml
 ```
