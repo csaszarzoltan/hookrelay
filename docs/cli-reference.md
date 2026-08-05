@@ -92,6 +92,54 @@ hookrelay replay abc123
 hookrelay replay abc123 --target http://localhost:5000/debug
 ```
 
+## `hookrelay bin`
+
+Manage webhook capture bins (v1.6.0+): persistent, webhook.site-style test
+endpoints that capture every request sent to their public URL.
+
+```bash
+hookrelay bin create [--description TEXT]
+hookrelay bin list
+hookrelay bin inspect <bin_id>
+hookrelay bin forward <request_id> --to <url>
+```
+
+**Subcommands:**
+
+| Command | Description |
+|---------|-------------|
+| `create` | Create a bin; prints its public capture URL and bin id |
+| `list` | List all bins (id, created at, URL, description) |
+| `inspect <bin_id>` | Show bin details and its captured requests (prints request ids) |
+| `forward <request_id> --to <url>` | Re-send a captured request to a target URL (SSRF-guarded) |
+
+**Arguments:**
+
+| Argument | Description |
+|----------|-------------|
+| `bin_id` | The bin id printed by `hookrelay bin create` |
+| `request_id` | The captured request id printed by `hookrelay bin inspect` — the same convention as `hookrelay replay <request_id>` |
+
+**Options:**
+
+| Option | Description |
+|--------|-------------|
+| `--description`, `-d` | Optional bin description for `create` |
+| `--to` | Target URL for `forward` (required) |
+
+**Example:**
+```bash
+hookrelay bin create --description "stripe tests"
+hookrelay bin list
+hookrelay bin inspect 002e2150bc5848169b05b0e451a574cb
+hookrelay bin forward f0417633a5a043bf9daaf61e95ef843a --to https://example.com/webhook
+```
+
+`bin forward` validates every target with the SSRF guard before sending; a
+blocked target (private IP, system port, disallowed protocol) exits non-zero
+with the guard's reason on stderr. Full REST API and dashboard reference:
+[`docs/capture-bins-1.6.md`](capture-bins-1.6.md).
+
 ## `hookrelay serve`
 
 Start the Hookrelay FastAPI server with Web Dashboard UI.
@@ -112,6 +160,8 @@ The server mounts:
 - **Web Dashboard** at `http://localhost:8000/dashboard/`
 - **Health check** at `http://localhost:8000/health`
 - **Webhook ingestion** at `POST http://localhost:8000/webhook/{channel}`
+- **Bin capture endpoint** at `GET/POST/PUT/PATCH/DELETE http://localhost:8000/bin/{bin_id}` (v1.6.0+, public)
+- **Bins dashboard** at `http://localhost:8000/dashboard/bins` (v1.6.0+)
 - **Relay WebSocket** at `ws://localhost:8000/ws/{channel}`
 - **History API** at `GET http://localhost:8000/api/history`
 - **Replay API** at `POST http://localhost:8000/api/replay/{request_id}`

@@ -186,8 +186,21 @@ The dashboard client automatically reconnects after a 3-second delay if the WebS
 Returns server status in JSON:
 
 ```json
-{"status": "ok", "version": "1.5.0"}
+{"status": "ok", "version": "1.6.0"}
 ```
+
+---
+
+## Bins view (v1.6.0+)
+
+**URL:** `/dashboard/bins`
+
+Manage webhook capture bins: create a bin with an optional description, copy
+its public capture URL, watch a live request feed (the same WebSocket as the
+Live Feed page, capped at 100 rows), and forward any captured request to a
+target URL with one click. Captured requests persist even when no dashboard
+or WebSocket client is connected. Full reference (REST API, SSRF behaviour,
+Python API): [`capture-bins-1.6.md`](capture-bins-1.6.md).
 
 ---
 
@@ -199,11 +212,18 @@ Returns server status in JSON:
 | `GET` | `/dashboard/history` | History Browser page |
 | `GET` | `/dashboard/inspect/{id}` | Payload Inspector page |
 | `GET` | `/dashboard/replay/{id}` | Request Replay page |
+| `GET` | `/dashboard/bins` | Bins view — capture bins + live feed (v1.6.0+) |
 | `GET` | `/dashboard/static/{file}` | Static assets (CSS, JS) |
 | `WS` | `/dashboard/ws/live` | Live monitoring WebSocket |
 | `POST` | `/api/replay/{id}` | Trigger a request replay |
 | `GET` | `/api/history` | History data (JSON) |
 | `GET` | `/api/history/search?q=...` | FTS5 full-text search |
+| `GET/POST/PUT/PATCH/DELETE` | `/bin/{bin_id}` | Public capture endpoint (v1.6.0+, no auth) |
+| `POST` | `/api/bins` | Create a capture bin (v1.6.0+) |
+| `GET` | `/api/bins` | List capture bins (v1.6.0+) |
+| `DELETE` | `/api/bins/{bin_id}` | Delete a bin and its captured requests (v1.6.0+) |
+| `GET` | `/api/bins/{bin_id}/requests` | List captured requests, paginated (v1.6.0+) |
+| `POST` | `/api/bins/{bin_id}/requests/{request_id}/forward` | Forward a captured request (v1.6.0+) |
 | `GET` | `/health` | Server health check |
 
 ---
