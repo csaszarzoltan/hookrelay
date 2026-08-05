@@ -50,6 +50,15 @@ _BINS_PAGE = """<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
 <button class="btn btn-primary" type="submit">Create bin</button>
 </form></section>
 <section class="bins-list" id="bins-list" aria-label="Capture bins"></section>
+<section class="bins-forward" id="bins-forward" hidden>
+<h2>Forward captured request</h2>
+<p>Request <code id="forward-request-id"></code> &middot; bin <code id="forward-bin-id"></code></p>
+<form id="forward-form" class="inline-form">
+<input id="forward-target-url" name="target_url" type="url" placeholder="https://example.com/webhook" required aria-label="Target URL">
+<button class="btn btn-primary" type="submit">Forward</button>
+</form>
+<p id="forward-result" class="forward-result" role="status" aria-live="polite"></p>
+</section>
 <section class="live-feed"><h2>Live request feed</h2>
 <table class="request-table"><thead><tr><th>Time</th><th>Method</th><th>Bin</th><th>Path</th><th>Source</th><th>ID</th><th>Actions</th></tr></thead>
 <tbody id="bins-feed-body"></tbody></table>
@@ -79,7 +88,7 @@ _BINS_PAGE = """<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
               esc(b.description || "") + ' <span class="badge">' + b.request_count + " requests</span></div>" +
               '<div class="bin-url"><input type="text" readonly value="' + esc(b.url) + '" aria-label="Bin URL">' +
               '<button class="btn btn-secondary" data-copy="' + esc(b.url) + '" type="button">Copy</button></div>' +
-              "<div><a class=\"btn btn-secondary\" href=\"/api/bins/" + esc(b.bin_id) + "/requests\">View requests</a></div></div>";
+              '<div><a class="btn btn-secondary" href="/api/bins/' + esc(b.bin_id) + '/requests">View requests</a></div></div>';
           }).join("")
         : '<div class="empty-state"><h2>No bins yet</h2><p>Create your first capture bin above.</p></div>';
     } catch (e) { /* storage not ready */ }
@@ -100,11 +109,11 @@ _BINS_PAGE = """<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
   function addFeedRow(msg) {
     emptyEl.style.display = "none";
     const tr = document.createElement("tr");
-    tr.innerHTML = "<td class=\"time\">" + esc((msg.received_at || "").slice(-12)) + "</td>" +
-      "<td><span class=\"method method-" + esc((msg.method || "").toLowerCase()) + "\">" + esc(msg.method) + "</span></td>" +
-      "<td>" + esc(msg.bin_id) + "</td><td>" + esc(msg.path || "/") + "</td><td>" + esc(msg.source_ip) + "</td>" +
-      "<td>" + esc(msg.request_id) + "</td>" +
-      "<td><a class=\"btn btn-secondary\" href=\"/dashboard/bins?request=" + esc(msg.request_id) + "\">Forward</a></td>";
+    tr.innerHTML = '<td class="time">' + esc((msg.received_at || "").slice(-12)) + '</td>' +
+      '<td><span class="method method-' + esc((msg.method || "").toLowerCase()) + '">' + esc(msg.method) + '</span></td>' +
+      '<td>' + esc(msg.bin_id) + '</td><td>' + esc(msg.path || "/") + '</td><td>' + esc(msg.source_ip) + '</td>' +
+      '<td>' + esc(msg.request_id) + '</td>' +
+      '<td><a class="btn btn-secondary" href="/dashboard/bins?request=' + esc(msg.request_id) + '&bin=' + esc(msg.bin_id) + '">Forward</a></td>';
     feedBody.prepend(tr);
     while (feedBody.children.length > 100) feedBody.removeChild(feedBody.lastChild);
   }
@@ -121,6 +130,35 @@ _BINS_PAGE = """<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
     };
     ws.onclose = function () { setTimeout(connect, 2000); };
   }
+  const forwardParams = new URLSearchParams(location.search);
+  const fwdRequestId = forwardParams.get("request");
+  const fwdBinId = forwardParams.get("bin");
+  const forwardPanel = document.getElementById("bins-forward");
+  if (fwdRequestId && fwdBinId) {
+    document.getElementById("forward-request-id").textContent = fwdRequestId;
+    document.getElementById("forward-bin-id").textContent = fwdBinId;
+    forwardPanel.hidden = false;
+  }
+  document.getElementById("forward-form").addEventListener("submit", function (ev) {
+    ev.preventDefault();
+    const resultEl = document.getElementById("forward-result");
+    if (!fwdRequestId || !fwdBinId) return;
+    const targetUrl = document.getElementById("forward-target-url").value;
+    resultEl.textContent = "Forwarding\u2026";
+    fetch("/api/bins/" + encodeURIComponent(fwdBinId) + "/requests/" + encodeURIComponent(fwdRequestId) + "/forward", {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({target_url: targetUrl})
+    }).then(function (r) { return r.json(); })
+      .then(function (data) {
+        if (data && typeof data.status_code === "number") {
+          resultEl.textContent = "Forwarded \u2014 HTTP " + data.status_code + " in " + Math.round(data.latency_ms) + " ms";
+        } else {
+          resultEl.textContent = "Forward failed: " + ((data && data.error) ? data.error : "unknown error");
+        }
+      })
+      .catch(function () { resultEl.textContent = "Forward request failed"; });
+  });
   loadBins();
   connect();
 })();

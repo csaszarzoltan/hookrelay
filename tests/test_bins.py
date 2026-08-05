@@ -584,3 +584,97 @@ class TestBinsDashboardBehavioral:
         message = json.loads(received[0])
         assert message["bin_id"] == "bin-1"
         assert message["request_id"] == "req-1"
+
+
+# ============================================================
+# Regression tests — review blockers B2/B3 (task t_5a54ccb2)
+# ============================================================
+
+
+class TestForwardRegressionB2:
+    """B2: forward must not replay stale Host/Content-Length/hop-by-hop headers.
+
+    The captured headers belong to the ORIGINAL sender; replaying them
+    verbatim sends ``Host: stale-original-host`` to the target (broken
+    virtual-host routing) and a Content-Length that no longer matches the
+    replayed body. The forward must strip those and let ``requests``
+    recompute them from the target URL and body.
+    """
+
+    def test_forward_uses_target_host_and_recomputed_content_length(
+        self, store, echo_server, allow_ssrf
+    ):
+        from urllib.parse import urlparse
+
+        payload = b'{"event": "invoice.paid"}'
+        store.store_request(
+            {
+                "request_id": "req-b2-stale-headers",
+                "channel": "bin-b2",
+                "method": "POST",
+                "path": "/",
+                "headers": {
+                    "Host": "stale-original-host:9999",
+                    "Content-Length": "5",  # deliberately stale (body is 27B)
+                    "Connection": "keep-alive",
+                    "X-Custom": "kept",
+                },
+                "body": payload,
+                "query_params": {},
+                "source_ip": "203.0.113.42",
+                "received_at": "2026-08-05T00:00:00+00:00",
+            }
+        )
+        target = f"{echo_server}/b2"
+        forward_captured_request(
+            bin_id="bin-b2",
+            request_id="req-b2-stale-headers",
+            target_url=target,
+            storage=store,
+        )
+        assert len(_EchoHandler.seen) == 1
+        seen = _EchoHandler.seen[0]
+        # The echo server must see ITS OWN host:port, not the stale original.
+        assert seen["headers"].get("Host") == urlparse(target).netloc
+        # Content-Length must match the replayed body, not the stale value.
+        assert int(seen["headers"].get("Content-Length", 0)) == len(payload)
+        # The captured body itself is still forwarded intact.
+        assert seen["body"] == payload
+        # Non-stale custom headers are preserved.
+        assert seen["headers"].get("X-Custom") == "kept"
+
+
+class TestForwardRegressionB3:
+    """B3: forward must replay the exact stored bytes, not a lossy decode.
+
+    ``BinService.get_request`` decodes the stored BLOB as UTF-8 with
+    ``errors="replace"``, which irreversibly corrupts binary payloads
+    (image/gzip/protobuf) before they are re-encoded for the target.
+    Forwarding must use the raw stored bytes.
+    """
+
+    def test_forward_preserves_binary_body_byte_for_byte(
+        self, store, echo_server, allow_ssrf
+    ):
+        payload = b"\x00\x01\xff\xfe\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR"
+        store.store_request(
+            {
+                "request_id": "req-b3-binary",
+                "channel": "bin-b3",
+                "method": "POST",
+                "path": "/",
+                "headers": {"Content-Type": "application/octet-stream"},
+                "body": payload,
+                "query_params": {},
+                "source_ip": "203.0.113.42",
+                "received_at": "2026-08-05T00:00:00+00:00",
+            }
+        )
+        forward_captured_request(
+            bin_id="bin-b3",
+            request_id="req-b3-binary",
+            target_url=f"{echo_server}/b3",
+            storage=store,
+        )
+        assert len(_EchoHandler.seen) == 1
+        assert _EchoHandler.seen[0]["body"] == payload

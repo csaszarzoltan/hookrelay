@@ -15,7 +15,6 @@ from typing import Any
 import requests
 
 from hookrelay.bins.models import ForwardResult
-from hookrelay.bins.service import BinService
 from hookrelay.ssrf import validate_target_url
 
 
@@ -25,6 +24,18 @@ class ForwardError(Exception):
 
 class BinRequestNotFoundError(ForwardError):
     """The captured request does not exist in the bin."""
+
+
+#: Headers that are never replayed verbatim when forwarding a captured
+#: request. They are either derived from the request line/body (Host,
+#: Content-Length) or hop-by-hop (Connection, Transfer-Encoding) — replaying
+#: them sends a stale ``Host`` to the target (broken virtual-host routing), a
+#: ``Content-Length`` that no longer matches the re-encoded body, and
+#: connection-level framing from the original sender. ``requests`` recomputes
+#: all of them from the target URL and the actual body.
+_STRIPPED_FORWARD_HEADERS = frozenset(
+    {"host", "content-length", "connection", "transfer-encoding"}
+)
 
 
 def forward_captured_request(
@@ -41,12 +52,21 @@ def forward_captured_request(
     result. The outcome is also persisted as a delivery attempt so the
     dashboard/API can display forwarding history.
 
+    The body is forwarded as the exact stored bytes — the raw storage row is
+    read directly because :meth:`BinService.get_request` decodes the BLOB as
+    UTF-8 with ``errors="replace"``, which would corrupt non-UTF-8 payloads
+    before they are re-encoded for the target. ``Host``, ``Content-Length``,
+    ``Connection`` and ``Transfer-Encoding`` are stripped from the replayed
+    headers so ``requests`` recomputes them.
+
     Raises :class:`ValueError` when the SSRF guard blocks the target and
     :class:`BinRequestNotFoundError` when the request is unknown.
     """
-    service = BinService(storage)
-    captured = service.get_request(bin_id, request_id)
-    if captured is None:
+    # Read the RAW stored row: `service.get_request` decodes the body to a
+    # lossy UTF-8 string (errors="replace"), so forwarding must bypass it to
+    # preserve binary payloads byte-for-byte.
+    captured = storage.get_request(request_id)
+    if captured is None or captured.get("channel") != bin_id:
         raise BinRequestNotFoundError(
             f"Request {request_id} not found in bin {bin_id}"
         )
@@ -56,7 +76,11 @@ def forward_captured_request(
         raise ValueError(reason)
 
     method = captured.get("method", "POST")
-    headers = dict(captured.get("headers") or {})
+    headers = {
+        key: value
+        for key, value in (captured.get("headers") or {}).items()
+        if key.lower() not in _STRIPPED_FORWARD_HEADERS
+    }
     body = captured.get("body")
     if isinstance(body, str):
         body = body.encode("utf-8")

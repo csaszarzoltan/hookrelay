@@ -33,6 +33,7 @@ from hookrelay.bins.forward import (
 )
 from hookrelay.bins.service import BinService
 from hookrelay.dashboard import get_live_manager
+from hookrelay.storage import Storage
 
 #: HTTP methods accepted by the public capture endpoint.
 _CAPTURE_METHODS = ["GET", "POST", "PUT", "PATCH", "DELETE"]
@@ -58,7 +59,7 @@ def _get_bin_service() -> BinService:
     return BinService(_get_or_create_storage())
 
 
-def _get_or_create_storage():
+def _get_or_create_storage() -> Storage:
     """Return the shared storage, creating the default one if needed."""
     store = _storage.get()
     if store is None:
@@ -180,8 +181,15 @@ def create_bins_router() -> APIRouter:
         return detail
 
     @router.post("/api/bins/{bin_id}/requests/{request_id}/forward")
-    async def forward_bin_request(bin_id: str, request_id: str, body: _ForwardTarget):
-        """Forward one captured request to an arbitrary, SSRF-guarded URL."""
+    def forward_bin_request(bin_id: str, request_id: str, body: _ForwardTarget):
+        """Forward one captured request to an arbitrary, SSRF-guarded URL.
+
+        Declared as a plain ``def`` (not ``async``) so FastAPI runs it in the
+        threadpool: :func:`hookrelay.bins.forward.forward_captured_request`
+        performs a blocking HTTP call, and doing that on the event loop would
+        stall every other endpoint (capture, dashboard, live WS) for up to the
+        30s timeout while concurrent forwards would serialize.
+        """
         service = _get_bin_service()
         if service.get_bin(bin_id) is None:
             raise HTTPException(status_code=404, detail="Bin not found")

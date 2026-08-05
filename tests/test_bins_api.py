@@ -23,6 +23,7 @@ import inspect
 import json
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from typing import ClassVar
 
 import pytest
 from fastapi.testclient import TestClient
@@ -368,3 +369,190 @@ class TestBinsDashboardView:
             data = json.loads(message)
             assert data.get("bin_id") == bin_info["bin_id"]
             assert data.get("request_id") == captured["request_id"]
+
+
+# ============================================================
+# Regression tests — review blockers B1/B3 + M1 (task t_5a54ccb2)
+# ============================================================
+
+
+class _RecordingEchoHandler(BaseHTTPRequestHandler):
+    """Echo server that records the raw method/headers/body it receives."""
+
+    seen: ClassVar[list[dict]] = []
+
+    def _handle(self) -> None:
+        length = int(self.headers.get("Content-Length", 0) or 0)
+        body = self.rfile.read(length) if length else b""
+        type(self).seen.append(
+            {
+                "method": self.command,
+                "headers": {k: v for k, v in self.headers.items()},
+                "body": body,
+            }
+        )
+        payload = json.dumps({"echo": True, "method": self.command}).encode()
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(payload)))
+        self.end_headers()
+        self.wfile.write(payload)
+
+    do_POST = _handle
+    do_PUT = _handle
+    do_GET = _handle
+    do_DELETE = _handle
+
+    def log_message(self, format, *args):  # keep test output clean
+        pass
+
+
+@pytest.fixture
+def recording_echo_server():
+    _RecordingEchoHandler.seen = []
+    server = ThreadingHTTPServer(("127.0.0.1", 0), _RecordingEchoHandler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    yield f"http://127.0.0.1:{server.server_address[1]}"
+    server.shutdown()
+    thread.join(timeout=5)
+
+
+class TestForwardRegressionB1:
+    """B1: the forward endpoint must not block the event loop.
+
+    Regression test uses a SINGLE event loop (httpx.ASGITransport), the same
+    model as production: a slow forward target must not stall other
+    endpoints. Starlette's TestClient spins up a fresh event loop per request,
+    which would mask the blocking bug, so it is deliberately not used here.
+    """
+
+    async def test_slow_forward_does_not_block_health(
+        self, tmp_path, monkeypatch
+    ):
+        import asyncio
+        import time
+
+        import httpx
+
+        import hookrelay.bins.forward as forward_mod
+
+        class _SlowHandler(BaseHTTPRequestHandler):
+            def do_POST(self):
+                length = int(self.headers.get("Content-Length", 0) or 0)
+                if length:
+                    self.rfile.read(length)
+                time.sleep(2.0)
+                payload = b'{"echo": true}'
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(payload)))
+                self.end_headers()
+                self.wfile.write(payload)
+
+            def log_message(self, format, *args):  # keep test output clean
+                pass
+
+        server = ThreadingHTTPServer(("127.0.0.1", 0), _SlowHandler)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        try:
+            slow_url = f"http://127.0.0.1:{server.server_address[1]}/slow"
+            monkeypatch.setattr(
+                forward_mod,
+                "validate_target_url",
+                lambda url, **kw: (True, None),
+                raising=False,
+            )
+            store = Storage(str(tmp_path / "bins_b1.db"))
+            _storage.set(store)
+            monkeypatch.delenv("HOOKRELAY_API_TOKEN", raising=False)
+
+            transport = httpx.ASGITransport(app=create_app())
+            async with httpx.AsyncClient(
+                transport=transport, base_url="http://testserver"
+            ) as client:
+                created = (await client.post("/api/bins", json={})).json()
+                captured = (
+                    await client.post(created["url"], content=b"{}")
+                ).json()
+
+                forward_task = asyncio.create_task(
+                    client.post(
+                        f"/api/bins/{created['bin_id']}/requests/"
+                        f"{captured['request_id']}/forward",
+                        json={"target_url": slow_url},
+                    )
+                )
+                # Let the forward reach the slow handler (it sleeps 2s), then
+                # check /health is still served promptly on the same loop.
+                await asyncio.sleep(0.4)
+                started = time.perf_counter()
+                health = await client.get("/health")
+                elapsed = time.perf_counter() - started
+                assert health.status_code == 200
+                assert elapsed < 1.0, (
+                    f"GET /health took {elapsed:.2f}s while a forward was in "
+                    "flight — the forward endpoint is blocking the event loop"
+                )
+                # The decisive check: /health must be served WHILE the forward
+                # is still running. If the endpoint blocks the loop, /health
+                # can only respond after the forward completes.
+                assert not forward_task.done(), (
+                    "/health was only served after the forward finished — the "
+                    "forward endpoint is blocking the event loop"
+                )
+                forward_response = await forward_task
+                assert forward_response.status_code == 200
+                assert forward_response.json()["status_code"] == 200
+        finally:
+            server.shutdown()
+            thread.join(timeout=5)
+
+
+class TestForwardRegressionB3Api:
+    """B3 via the API: captured binary bytes must round-trip byte-identical."""
+
+    def test_api_forward_preserves_binary_body(
+        self, tmp_path, monkeypatch, recording_echo_server
+    ):
+        import hookrelay.bins.forward as forward_mod
+
+        monkeypatch.setattr(
+            forward_mod,
+            "validate_target_url",
+            lambda url, **kw: (True, None),
+            raising=False,
+        )
+        client, _ = _client(tmp_path, monkeypatch)
+        bin_info = _create_bin(client)
+        payload = b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x01\xff\xfe"
+        captured = client.post(
+            bin_info["url"],
+            content=payload,
+            headers={"Content-Type": "application/octet-stream"},
+        ).json()
+        response = client.post(
+            f"/api/bins/{bin_info['bin_id']}/requests/"
+            f"{captured['request_id']}/forward",
+            json={"target_url": f"{recording_echo_server}/receive"},
+        )
+        assert response.status_code == 200
+        assert len(_RecordingEchoHandler.seen) == 1
+        assert _RecordingEchoHandler.seen[0]["body"] == payload
+
+
+class TestBinsDashboardForwardRegressionM1:
+    """M1: the Bins page must actually implement click-to-forward."""
+
+    def test_bins_page_implements_click_to_forward(self, tmp_path, monkeypatch):
+        client, _ = _client(tmp_path, monkeypatch)
+        page = client.get("/dashboard/bins").text
+        # The live-feed Forward link carries both request id and bin id...
+        assert "&bin=" in page
+        # ...and the page JS reads the query params, renders a forward form
+        # with a target-URL input, and POSTs to the forward endpoint.
+        assert "URLSearchParams" in page
+        assert "bins-forward" in page
+        assert "forward-target-url" in page
+        assert "/forward" in page

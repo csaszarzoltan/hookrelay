@@ -1,9 +1,19 @@
 """Webhook capture bins (v1.6.0).
 
 Persistent, webhook.site-style test endpoints with one-click forward and
-payload inspection. Pre-development package: models are real dataclasses
-(data contract); service/forward/api/dashboard/cli are stubs raising
-``NotImplementedError`` until the developer implements the feature.
+payload inspection. The package is fully implemented:
+
+* :mod:`hookrelay.bins.models` — dataclass data contract
+  (``Bin``, ``CapturedRequest``, ``ForwardResult``)
+* :mod:`hookrelay.bins.service` — ``BinService`` persistence/management
+  over the shared :class:`hookrelay.storage.Storage`
+* :mod:`hookrelay.bins.forward` — SSRF-guarded replay of captured requests
+  (byte-exact bodies, hop-by-hop headers recomputed)
+* :mod:`hookrelay.bins.api` — FastAPI REST wiring (capture + management
+  endpoints)
+* :mod:`hookrelay.bins.dashboard` — live-feed broadcast + Bins dashboard
+  view with click-to-forward
+* :mod:`hookrelay.bins.cli` — the ``hookrelay bin`` command group
 """
 
 from __future__ import annotations

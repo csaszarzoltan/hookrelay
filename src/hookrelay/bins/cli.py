@@ -16,7 +16,6 @@ import typer
 from hookrelay import _storage
 from hookrelay.bins.forward import forward_captured_request
 from hookrelay.bins.service import BinService
-from hookrelay.ssrf import SSRFError
 from hookrelay.storage import Storage
 
 
@@ -81,7 +80,9 @@ def bin_forward(request_id: str, to: str) -> None:
     bin_id = request.get("channel", "")
     try:
         result = forward_captured_request(bin_id, request_id, to, storage=store)
-    except (ValueError, SSRFError) as exc:
+    except ValueError as exc:
+        # The SSRF guard and invalid-target errors surface as ValueError
+        # (SSRFError exists but is never raised by the forward path).
         typer.echo(f"Error: {exc}", err=True)
         raise typer.Exit(code=1)
     typer.echo(f"Forwarded {result.request_id} -> {result.target_url}")
