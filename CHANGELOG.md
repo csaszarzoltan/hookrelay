@@ -5,6 +5,35 @@ All notable changes to **hookrelay** are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.6.0] — 2026-08-05
+
+### Features
+
+- **Webhook Capture Bins** — public capture endpoint `/bin/{bin_id}` (GET/POST/PUT/PATCH/DELETE) plus `/api/bins` CRUD with paginated request listing and full payload view; the bin id doubles as the webhooks channel, so captures persist even with no WebSocket client connected
+- **Forward Replay** — one-click re-send of a captured request (method/headers/body) to any target, SSRF-guarded via `ssrf.validate_target_url`; the forward endpoint runs off the event loop (sync def, threadpooled), strips hop-by-hop headers (Host/Content-Length/Connection/Transfer-Encoding) and lets `requests` recompute them, and replays binary bodies byte-exact from the raw stored row
+- **Bins CLI** — `hookrelay bin create|list|inspect|forward` group wired into the main CLI
+- **Bins Dashboard** — new `/dashboard/bins` page with bin creation, copy-URL, live feed, and click-to-forward; capture events broadcast over the existing `/dashboard/ws/live` connection manager
+- **Storage & Server** — `bins` table with cascading request cleanup, bin CRUD in `Storage`, routers mounted with a flat `app.routes`, and `/bin/` made public in the auth middleware
+
+### Fixes
+
+- **Review blockers B1–B3** — forward endpoint no longer stalls the event loop (sync def); Host/Content-Length/Connection/Transfer-Encoding stripped and recomputed on replay; byte-exact binary body replay from the raw stored row
+- **Review mediums M1–M4** — dashboard click-to-forward implemented and the served-page JS is now valid (double-escaped strings fixed); package docstring describes the feature; dead `SSRFError` catch removed from the bin CLI; `_get_or_create_storage` return type annotated
+- **Security gate** — replaced f-string-built SQL in `schemas.py` and `backup.py` with allowlist/parameterized construction (behavior byte-identical)
+- **Routing-rule hardening** — `update_routing_rule` drops non-allowlisted keys before building the SET clause; `cli status` validates the health URL through the SSRF guard plus an explicit http/https scheme check
+- **Hermetic test fixtures** — `test_validation_results.py` store fixture moved to `tmp_path` (no fixed `/tmp` DB collisions on full-suite runs)
+
+### Tests
+
+- 93 new pre-dev TDD tests for capture bins: `test_bins.py` (52), `test_bins_api.py` (24), `test_bins_cli.py` (17)
+- 5 regression tests pinning B1 (off-loop forward), B2 (hop-by-hop header strip), B3 (byte-exact replay, unit + API round-trip), and M1 (click-to-forward)
+- Full suite: **871 passed, 0 failed, 0 errors, 0 skipped** (27 modules, junitxml-verified); ruff clean on scope
+
+### Docs
+
+- README — capture bins usage: `hookrelay bin` commands and `/dashboard/bins`
+- Package docstring updated to describe the implemented feature
+
 ## [1.5.0] — 2026-08-02
 
 ### Features
