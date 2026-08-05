@@ -263,8 +263,11 @@ def inspect_backup(
                 }
                 for key, table in mapping.items():
                     if table in tables:
+                        # table comes from the hardcoded internal mapping above
+                        # (never user input); keep it as concatenation so the
+                        # statement is not an f-string.
                         counts[key] = connection.execute(
-                            f"SELECT COUNT(*) FROM {table}"
+                            "SELECT COUNT(*) FROM " + table
                         ).fetchone()[0]
             finally:
                 connection.close()

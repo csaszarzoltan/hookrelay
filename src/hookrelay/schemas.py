@@ -206,8 +206,10 @@ class SchemaStore:
         params.append(now)
         params.append(schema_id)
 
+        # Build the SET clause from allowlisted fragments only; values are
+        # always passed as ? parameters, never interpolated into SQL.
         self._conn.execute(
-            f"UPDATE schemas SET {', '.join(set_clauses)} WHERE schema_id = ?",
+            "UPDATE schemas SET " + ", ".join(set_clauses) + " WHERE schema_id = ?",
             params,
         )
         self._conn.commit()
