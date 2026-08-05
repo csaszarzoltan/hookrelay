@@ -134,6 +134,12 @@ class Storage:
                 created_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL
             );
+            CREATE TABLE IF NOT EXISTS bins (
+                bin_id TEXT PRIMARY KEY,
+                description TEXT,
+                created_at TEXT NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_bins_created_at ON bins(created_at DESC);
         """)
         self._conn.commit()
 
@@ -778,6 +784,72 @@ class Storage:
 
         rows = self._conn.execute(sql, params).fetchall()
         return [self._row_to_dict(r) for r in rows]
+
+    # ============================================================
+    # v1.6.0: Webhook capture bins (bin metadata + bin-scoped lookups)
+    # ============================================================
+
+    def create_bin(self, bin_id: str, description: str | None, created_at: str) -> None:
+        """Persist a capture bin's metadata row.
+
+        Args:
+            bin_id: Unique bin identifier (also used as the webhooks channel).
+            description: Optional human-readable description.
+            created_at: ISO-8601 creation timestamp.
+        """
+        self._conn.execute(
+            "INSERT INTO bins(bin_id, description, created_at) VALUES (?, ?, ?)",
+            (bin_id, description, created_at),
+        )
+        self._conn.commit()
+
+    def get_bin(self, bin_id: str) -> dict[str, Any] | None:
+        """Return a bin's metadata row, or ``None`` if it does not exist."""
+        row = self._conn.execute(
+            "SELECT * FROM bins WHERE bin_id = ?", (bin_id,)
+        ).fetchone()
+        return dict(row) if row is not None else None
+
+    def list_bins(self) -> list[dict[str, Any]]:
+        """Return all bins, newest first."""
+        rows = self._conn.execute(
+            "SELECT * FROM bins ORDER BY created_at DESC"
+        ).fetchall()
+        return [dict(row) for row in rows]
+
+    def delete_bin(self, bin_id: str) -> bool:
+        """Delete a bin and all of its captured requests.
+
+        Returns True if the bin existed and was deleted. Request rows are
+        removed through the same cascade path as :meth:`delete_request`
+        (delivery attempts and validation results are cleaned up too).
+        """
+        if self._conn.execute(
+            "SELECT 1 FROM bins WHERE bin_id = ?", (bin_id,)
+        ).fetchone() is None:
+            return False
+        self._init_validation_results_table()
+        request_ids = [
+            row["request_id"]
+            for row in self._conn.execute(
+                "SELECT request_id FROM webhooks WHERE channel = ?", (bin_id,)
+            ).fetchall()
+        ]
+        with self._conn:
+            for request_id in request_ids:
+                self._conn.execute(
+                    "DELETE FROM delivery_attempts WHERE request_id = ?",
+                    (request_id,),
+                )
+                self._conn.execute(
+                    "DELETE FROM validation_results WHERE request_id = ?",
+                    (request_id,),
+                )
+                self._conn.execute(
+                    "DELETE FROM webhooks WHERE request_id = ?", (request_id,)
+                )
+            self._conn.execute("DELETE FROM bins WHERE bin_id = ?", (bin_id,))
+        return True
 
     def close(self) -> None:
         """Close the database connection."""

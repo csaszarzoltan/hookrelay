@@ -510,7 +510,7 @@ def create_app() -> FastAPI:
             return await call_next(request)
         path = request.url.path
         public = path in {"/health", "/", "/dashboard/login"} or path.startswith(
-            ("/webhook/", "/dashboard/static/")
+            ("/webhook/", "/dashboard/static/", "/bin/")
         )
         if public:
             return await call_next(request)
@@ -605,6 +605,20 @@ def create_app() -> FastAPI:
     static_dir = Path(__file__).resolve().parent / "dashboard" / "static"
     if static_dir.exists():
         app.mount("/dashboard/static", StaticFiles(directory=str(static_dir)), name="dashboard_static")
+
+    # Mount bins API + dashboard (v1.6.0 webhook capture bins).
+    # Routes are appended manually (like the dashboard router) so app.routes
+    # stays flat — Starlette's include_router wraps routes in _IncludedRouter
+    # objects that break tests iterating app.routes for .path.
+    from hookrelay.bins.api import create_bins_router
+    from hookrelay.bins.dashboard import create_bins_dashboard_router
+
+    bins_router = create_bins_router()
+    for route in bins_router.routes:
+        app.router.routes.append(route)
+    bins_dashboard_router = create_bins_dashboard_router()
+    for route in bins_dashboard_router.routes:
+        app.router.routes.append(route)
 
     # Register schema API routes
     _register_schema_api_routes(app)

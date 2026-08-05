@@ -223,6 +223,35 @@ every feature live in [`examples/`](examples/).
 |---|---|
 | ![History Browser](docs/screenshots/history.png) | ![Replay](docs/screenshots/replay.png) |
 
+## Webhook capture bins (v1.6.0)
+
+Create persistent, webhook.site-style test endpoints that capture every
+request — method, headers, body, query params, source IP and timestamp — even
+when no client is connected:
+
+```bash
+# 1. Create a bin — prints the public capture URL
+hookrelay bin create --description "stripe tests"
+#   → Bin created: http://localhost:8000/bin/<bin_id>
+
+# 2. Point any sender at that URL (POST/GET/PUT/PATCH/DELETE all captured)
+curl -X POST http://localhost:8000/bin/<bin_id>?src=stripe \
+     -H "Content-Type: application/json" -d '{"event": "invoice.paid"}'
+
+# 3. Inspect captured requests (prints request ids)
+hookrelay bin inspect <bin_id>
+
+# 4. One-click forward a captured request to any target (SSRF-guarded)
+hookrelay bin forward <request_id> --to https://example.com/webhook
+```
+
+- REST API: `POST /api/bins`, `GET /api/bins`, `DELETE /api/bins/{id}`,
+  `GET /api/bins/{id}/requests` (paginated), per-request full payload view,
+  and `POST /api/bins/{id}/requests/{request_id}/forward`.
+- Dashboard **Bins** view at `/dashboard/bins`: create a bin, copy its URL,
+  watch the live request feed (same WS as `/dashboard/ws/live`), and forward
+  captured requests with one click.
+
 ## CLI Commands
 
 | Command | Description |
@@ -234,6 +263,10 @@ every feature live in [`examples/`](examples/).
 | `hookrelay history --id <id>` | View full request details |
 | `hookrelay replay <id>` | Replay a stored webhook request |
 | `hookrelay status` | Check relay server health |
+| `hookrelay bin create` | Create a webhook capture bin and print its public URL |
+| `hookrelay bin list` | List all capture bins |
+| `hookrelay bin inspect <bin_id>` | Show bin details and captured requests |
+| `hookrelay bin forward <request_id> --to <url>` | Forward a captured request to a URL (SSRF-guarded) |
 
 ### Options
 
@@ -260,6 +293,7 @@ hookrelay/
 │       ├── server.py             # FastAPI server (dashboard + relay + APIs)
 │       ├── ssrf.py               # SSRF protection
 │       ├── storage.py            # SQLite storage with FTS5
+│       ├── bins/                 # Webhook capture bins (service, forward, API, CLI, dashboard)
 │       ├── config/               # Per-endpoint config (RetryPolicy, headers)
 │       ├── delivery/             # Retry queue, DLQ, idempotency, tracking
 │       ├── security/             # HMAC signature verification
