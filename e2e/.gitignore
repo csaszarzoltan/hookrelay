@@ -1,0 +1,4 @@
+# Playwright E2E smoke — node artifacts
+node_modules/
+test-results/
+playwright-report/

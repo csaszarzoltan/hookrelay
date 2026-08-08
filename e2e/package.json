@@ -1,0 +1,12 @@
+{
+  "name": "hookrelay-e2e-smoke",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Minimal Playwright UI E2E smoke for the Hookrelay dashboard (v1.7.0 alerting + insights)",
+  "scripts": {
+    "test:e2e": "playwright test --project=chromium"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.62.1"
+  }
+}
