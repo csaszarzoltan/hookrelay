@@ -295,6 +295,32 @@ def create_dashboard_router() -> APIRouter:
             },
         )
 
+    @router.get("/dashboard/alerts", response_class=HTMLResponse)
+    async def dashboard_alerts(request: Request):
+        """Render the Alerts tab (rules list + create form + toggle/delete)."""
+        store = _storage.get()
+        from hookrelay.alerts.notifiers import load_notifiers_from_settings
+        from hookrelay.alerts.storage import AlertRuleStore
+
+        rules = AlertRuleStore(store).list() if store else []
+        notifiers = load_notifiers_from_settings(store).list_notifiers() if store else []
+        interval_seconds = int(store.get_setting("alert_interval_seconds", 60)) if store else 60
+        return templates.TemplateResponse(
+            request,
+            "alerts.html",
+            {
+                "rules": [rule.to_dict() for rule in rules],
+                "notifiers": notifiers,
+                "interval_seconds": interval_seconds,
+            },
+        )
+
+    @router.get("/dashboard/insights", response_class=HTMLResponse)
+    async def dashboard_insights(request: Request):
+        """Render the Insights view (endpoint table + time-series chart)."""
+        return templates.TemplateResponse(request, "insights.html", {})
+
+
     @router.websocket("/dashboard/ws/live")
     async def live_websocket(ws: WebSocket):
         auth_token = configured_token()

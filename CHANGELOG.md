@@ -5,6 +5,26 @@ All notable changes to **hookrelay** are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.7.0] — 2026-08-08
+
+### Features
+
+- **Failure Alerting** — declarative alert rules (`alert_rules` table, migration 6) evaluated by a configurable ~60s background loop (daemon thread, off the event loop) over rolling windows of stored delivery attempts: `success_rate_below`, `consecutive_failures`, and `dlq_depth_above` metrics, with per-rule cooldown (default 15 min); paused rules never fire
+- **Notifiers** — Slack incoming-webhook, SMTP email (stdlib `smtplib`, STARTTLS + auth), and generic outbound webhook channels, fan-out through a `NotifierRegistry`; every outbound URL is SSRF-guarded (repo `ssrf.validate_target_url`) at save and at fire; notifier definitions persist under `app_settings["alert_notifiers"]`
+- **Alerts API** — `GET/POST /api/alerts/rules`, `PATCH/DELETE /api/alerts/rules/{id}`, notifier CRUD + test endpoint, `GET /api/alerts/status` and `GET /api/alerts/history` (fire history table, migration 7, with tamper-evident audit entries)
+- **Delivery Insights** — `GET /api/insights/endpoints` (per-endpoint deliveries/success-rate/latency percentiles/top failure reason) and `GET /api/insights/timeseries` (zero-filled chronological buckets for deliveries/success_rate/latency_p95) with 422 validation on window/bucket
+- **Alerts + Insights CLI** — `hookrelay alerts list|create|delete` and `hookrelay insights endpoints|timeseries`
+- **Dashboard** — `/dashboard/alerts` tab (rules list, create form, enable/disable toggle, delete) and `/dashboard/insights` view (endpoint stats table + canvas time-series chart)
+
+### Tests
+
+- 263 pre-dev TDD tests for alerting + insights across 7 files (`test_alert_rules`, `test_alert_evaluator`, `test_notifiers`, `test_alerts_api`, `test_alert_history`, `test_insights_service`, `test_insights_api`)
+- Full suite baseline: 871 pre-existing tests unchanged
+
+### Docs
+
+- README — `hookrelay alerts` / `hookrelay insights` CLI usage and dashboard tabs
+
 ## [1.6.0] — 2026-08-05
 
 ### Features

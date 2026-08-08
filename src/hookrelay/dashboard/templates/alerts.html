@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Alerts — Hookrelay Dashboard</title>
+    <link rel="stylesheet" href="/dashboard/static/style.css">
+</head>
+<body>
+    <nav class="dashboard-nav">
+        <div class="nav-brand">Hookrelay</div>
+        <div class="nav-links">
+            <a href="/dashboard/">Live Feed</a>
+            <a href="/dashboard/history">History</a>
+            <a href="/dashboard/alerts" class="active">Alerts</a>
+            <a href="/dashboard/insights">Insights</a>
+            <a href="/dashboard/backups">Backups</a>
+            <a href="/dashboard/settings">Settings</a>
+            {% if auth_enabled() %}<form method="post" action="/dashboard/logout" class="nav-logout"><button type="submit">Sign out</button></form>{% endif %}
+        </div>
+    </nav>
+    <main class="dashboard-main">
+        <header class="page-header"><h1>Alerts</h1>
+            <span class="badge">Evaluator interval: {{ interval_seconds }}s</span>
+        </header>
+        <div id="alerts-banner" role="alert" class="alert-banner" hidden></div>
+
+        <section class="settings-card" aria-labelledby="rules-heading">
+            <h2 id="rules-heading">Alert rules</h2>
+            {% if rules %}
+            <table class="request-table" aria-label="Alert rules">
+                <thead><tr><th>Name</th><th>Scope</th><th>Metric</th><th>Threshold</th><th>Window</th><th>Cooldown</th><th>Status</th><th>Last fired</th><th></th></tr></thead>
+                <tbody id="rules-body">
+                {% for rule in rules %}
+                    <tr data-rule-id="{{ rule.rule_id }}">
+                        <td>{{ rule.name }}</td>
+                        <td>{{ rule.scope }}{% if rule.endpoint_id %}: {{ rule.endpoint_id }}{% endif %}</td>
+                        <td>{{ rule.metric }}</td>
+                        <td>{{ rule.threshold }}</td>
+                        <td>{{ rule.window_minutes }}m</td>
+                        <td>{{ rule.cooldown_minutes }}m</td>
+                        <td><span class="badge rule-enabled {{ 'badge-on' if rule.enabled else 'badge-off' }}">{{ 'Enabled' if rule.enabled else 'Paused' }}</span></td>
+                        <td>{{ rule.last_fired_at or '—' }}</td>
+                        <td>
+                            <button type="button" class="btn btn-secondary btn-sm rule-toggle" data-rule-id="{{ rule.rule_id }}" data-enabled="{{ 'true' if rule.enabled else 'false' }}">{{ 'Pause' if rule.enabled else 'Enable' }}</button>
+                            <button type="button" class="btn btn-danger btn-sm rule-delete" data-rule-id="{{ rule.rule_id }}" data-name="{{ rule.name }}">Delete</button>
+                        </td>
+                    </tr>
+                {% endfor %}
+                </tbody>
+            </table>
+            {% else %}
+            <p class="empty-state">No alert rules yet — create one below.</p>
+            {% endif %}
+        </section>
+
+        <section class="settings-card" aria-labelledby="create-heading">
+            <h2 id="create-heading">Create alert rule</h2>
+            <form id="rule-form" class="rule-form">
+                <label for="rule-name">Name</label>
+                <input id="rule-name" type="text" required placeholder="high failure rate">
+
+                <label for="rule-scope">Scope</label>
+                <select id="rule-scope">
+                    <option value="all">All endpoints</option>
+                    <option value="endpoint">Single endpoint</option>
+                </select>
+
+                <label for="rule-endpoint">Endpoint ID (for endpoint scope)</label>
+                <input id="rule-endpoint" type="text" placeholder="endpoint-1">
+
+                <label for="rule-metric">Metric</label>
+                <select id="rule-metric">
+                    <option value="success_rate_below">Success rate below</option>
+                    <option value="consecutive_failures">Consecutive failures</option>
+                    <option value="dlq_depth_above">DLQ depth above</option>
+                </select>
+
+                <label for="rule-threshold">Threshold</label>
+                <input id="rule-threshold" type="number" step="any" min="0" required placeholder="0.9">
+
+                <label for="rule-window">Window (minutes)</label>
+                <input id="rule-window" type="number" min="1" value="15">
+
+                <label for="rule-cooldown">Cooldown (minutes)</label>
+                <input id="rule-cooldown" type="number" min="1" value="15">
+
+                <label for="rule-notifiers">Notifiers</label>
+                <select id="rule-notifiers" multiple>
+                    {% for notifier in notifiers %}
+                    <option value="{{ notifier.id }}">{{ notifier.type }} ({{ notifier.id }})</option>
+                    {% endfor %}
+                </select>
+
+                <div class="settings-actions">
+                    <button type="submit" class="btn btn-primary">Create rule</button>
+                </div>
+            </form>
+            <div id="rule-form-result" role="status" aria-live="polite"></div>
+        </section>
+    </main>
+    <script src="/dashboard/static/dashboard.js"></script>
+</body>
+</html>

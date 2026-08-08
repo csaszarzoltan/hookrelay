@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "hookrelay"
-version = "1.6.0"
+version = "1.7.0"
 description = "Webhook relay tool for local development. CLI-first webhook debugging, payload inspection, replay, and SSRF protection."
 readme = "README.md"
 requires-python = ">=3.11"

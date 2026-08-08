@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Insights — Hookrelay Dashboard</title>
+    <link rel="stylesheet" href="/dashboard/static/style.css">
+</head>
+<body>
+    <nav class="dashboard-nav">
+        <div class="nav-brand">Hookrelay</div>
+        <div class="nav-links">
+            <a href="/dashboard/">Live Feed</a>
+            <a href="/dashboard/history">History</a>
+            <a href="/dashboard/alerts">Alerts</a>
+            <a href="/dashboard/insights" class="active">Insights</a>
+            <a href="/dashboard/backups">Backups</a>
+            <a href="/dashboard/settings">Settings</a>
+            {% if auth_enabled() %}<form method="post" action="/dashboard/logout" class="nav-logout"><button type="submit">Sign out</button></form>{% endif %}
+        </div>
+    </nav>
+    <main class="dashboard-main">
+        <header class="page-header"><h1>Delivery insights</h1>
+            <span class="badge">Last 24 hours</span>
+        </header>
+        <div id="insights-banner" role="alert" class="alert-banner" hidden></div>
+
+        <section class="settings-card" aria-labelledby="chart-heading">
+            <h2 id="chart-heading">Deliveries over time</h2>
+            <canvas id="insights-chart" width="900" height="260" role="img" aria-label="Deliveries time-series chart"></canvas>
+        </section>
+
+        <section class="settings-card" aria-labelledby="endpoints-heading">
+            <h2 id="endpoints-heading">Per-endpoint stats</h2>
+            <table class="request-table" aria-label="Per-endpoint delivery stats">
+                <thead><tr><th>Endpoint</th><th>Deliveries</th><th>Success rate</th><th>p50</th><th>p95</th><th>p99</th><th>Top failure reason</th></tr></thead>
+                <tbody id="endpoints-body"></tbody>
+            </table>
+        </section>
+    </main>
+    <script src="/dashboard/static/dashboard.js"></script>
+</body>
+</html>

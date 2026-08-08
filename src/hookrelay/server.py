@@ -626,6 +626,36 @@ def create_app() -> FastAPI:
     # Register delivery / DLQ / dashboard-metrics API routes
     _register_delivery_api_routes(app)
 
+    # Mount alerts + insights routers flat (see bins comment above: keep
+    # app.routes flat so tests iterating .path keep working).
+    from hookrelay.alerts.api import create_alerts_router
+    from hookrelay.insights.api import create_insights_router
+
+    alerts_router = create_alerts_router()
+    for route in alerts_router.routes:
+        app.router.routes.append(route)
+    insights_router = create_insights_router()
+    for route in insights_router.routes:
+        app.router.routes.append(route)
+
+    # Start the alert evaluator daemon thread (blocking notifiers must not
+    # live on the event loop). Interval comes from app_settings so it can be
+    # tuned at runtime; the loop only starts when alert rules exist.
+    try:
+        from hookrelay.alerts.evaluator import AlertEvaluator
+        from hookrelay.alerts.notifiers import load_notifiers_from_settings
+        from hookrelay.alerts.storage import AlertRuleStore
+
+        interval = int(store.get_setting("alert_interval_seconds", 60))
+        rule_store = AlertRuleStore(store)
+        evaluator = AlertEvaluator(rule_store, load_notifiers_from_settings(store))
+        if store.get_setting("alert_evaluator_enabled", True) and rule_store.list():
+            evaluator.start(interval_seconds=interval)
+        store._alert_evaluator = evaluator
+    except Exception:
+        # Evaluator wiring must never prevent the server from starting.
+        pass
+
 
     @app.get("/api/settings/retention")
     async def get_retention():

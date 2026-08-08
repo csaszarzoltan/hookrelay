@@ -290,6 +290,11 @@ class Storage:
 
     def _backfill_audit_hash_chain(self) -> None:
         """Create hashes for pre-1.1 audit rows without changing their content."""
+        table = self._conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='audit_log'"
+        ).fetchone()
+        if table is None:
+            return
         rows = self._conn.execute(
             "SELECT * FROM audit_log ORDER BY created_at ASC, audit_id ASC"
         ).fetchall()

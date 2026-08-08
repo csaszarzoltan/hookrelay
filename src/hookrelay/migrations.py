@@ -5,7 +5,7 @@ from __future__ import annotations
 import sqlite3
 from datetime import UTC, datetime
 
-CURRENT_SCHEMA_VERSION = 5
+CURRENT_SCHEMA_VERSION = 7
 
 _MIGRATIONS: dict[int, tuple[str, str]] = {
     1: (
@@ -60,6 +60,41 @@ _MIGRATIONS: dict[int, tuple[str, str]] = {
         """CREATE TABLE IF NOT EXISTS _mig5_dummy (dummy INTEGER);
         DROP TABLE IF EXISTS _mig5_dummy;
         """,
+    ),
+    6: (
+        "alert-rules",
+        """CREATE TABLE IF NOT EXISTS alert_rules (
+            rule_id TEXT PRIMARY KEY,
+            name TEXT NOT NULL,
+            scope TEXT NOT NULL,
+            endpoint_id TEXT,
+            metric TEXT NOT NULL,
+            threshold REAL NOT NULL,
+            window_minutes INTEGER NOT NULL DEFAULT 15,
+            cooldown_minutes INTEGER NOT NULL DEFAULT 15,
+            enabled INTEGER NOT NULL DEFAULT 1,
+            notifier_ids TEXT NOT NULL DEFAULT '[]',
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            last_fired_at TEXT
+        );
+        CREATE INDEX IF NOT EXISTS idx_alert_rules_scope_endpoint
+            ON alert_rules(scope, endpoint_id);""",
+    ),
+    7: (
+        "alert-history",
+        """CREATE TABLE IF NOT EXISTS alert_history (
+            event_id TEXT PRIMARY KEY,
+            rule_id TEXT NOT NULL,
+            rule_name TEXT,
+            metric TEXT,
+            observed_value REAL,
+            threshold REAL,
+            message TEXT,
+            fired_at TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_alert_history_fired_at
+            ON alert_history(fired_at DESC);""",
     ),
 }
 

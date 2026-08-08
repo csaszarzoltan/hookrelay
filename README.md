@@ -99,6 +99,8 @@
 - **Real-time inspection** — view method, headers, body, and query params as they arrive
 - **Request replay** — replay any received webhook with one command: `hookrelay replay <id>`
 - **Capture bins (v1.6.0+)** — create persistent test endpoints and forward captured requests: `hookrelay bin create|list|inspect|forward`
+- **Alerting (v1.7.0+)** — failure alert rules with rolling-window evaluation: `hookrelay alerts list|create|delete`
+- **Delivery insights (v1.7.0+)** — per-endpoint stats and time series: `hookrelay insights endpoints|timeseries`
 - **History browser** — search and browse webhooks with FTS5 full-text search
 - **Conditional forwarding** — filter by source IP, HTTP method, path, headers, or status code
 - **SSRF protection** — IP range blocking (IPv4/IPv6), DNS anti-rebinding, protocol whitelist
@@ -113,6 +115,8 @@
 - **Live Monitoring WebSocket** — `/dashboard/ws/live` for programmatic real-time event streaming
 - **Team delivery metrics (v1.5.0+)** — read-only analyzers for counts by status/endpoint, p50/p95/p99 latency, and success rates, ready to power dashboard/API views (`hookrelay.dashboard.*`, see [dashboard metrics guide](docs/dashboard-metrics-1.5.md))
 - **Bins view (v1.6.0+)** — create capture bins, copy their public URLs, watch a live request feed, and forward captured requests with one click (see [capture bins guide](docs/capture-bins-1.6.md))
+- **Alerts tab (v1.7.0+)** — `/dashboard/alerts`: alert rule list, create form, enable/disable toggle, and delete
+- **Insights view (v1.7.0+)** — `/dashboard/insights`: per-endpoint delivery stats table and a canvas time-series chart
 
 ## Installation
 

@@ -744,3 +744,214 @@ def _serve_cmd(
         reload=reload,
         factory=True,
     )
+
+
+# ============================================================
+# Alerts commands (failure alerting, v1.7.0)
+# ============================================================
+
+
+def alerts_list() -> list[dict]:
+    """List all alert rules as dicts.
+
+    Usage: hookrelay alerts list
+    """
+    from hookrelay.alerts.storage import AlertRuleStore
+
+    store = _get_storage()
+    return [rule.to_dict() for rule in AlertRuleStore(store).list()]
+
+
+def alerts_create(
+    name: str,
+    scope: str,
+    metric: str,
+    threshold: float,
+    endpoint_id: str | None = None,
+    window_minutes: int = 15,
+    cooldown_minutes: int = 15,
+    notifier_ids: list[str] | None = None,
+) -> dict:
+    """Create one alert rule and return its dict.
+
+    Args:
+        name: Human-readable rule name.
+        scope: ``all`` or ``endpoint``.
+        metric: success_rate_below | consecutive_failures | dlq_depth_above.
+        threshold: Crossing threshold (metric-specific range).
+        endpoint_id: Required when scope is ``endpoint``.
+        window_minutes / cooldown_minutes: Rolling window and fire cooldown.
+        notifier_ids: Notifier ids to fan out to.
+
+    Returns:
+        The created rule as a dict.
+    """
+    from datetime import UTC, datetime
+    from uuid import uuid4
+
+    from hookrelay.alerts.rules import AlertRule
+    from hookrelay.alerts.storage import AlertRuleStore
+
+    store = _get_storage()
+    now = datetime.now(UTC).isoformat()
+    rule = AlertRule(
+        rule_id=uuid4().hex,
+        name=name,
+        scope=scope,  # type: ignore[arg-type]
+        endpoint_id=endpoint_id,
+        metric=metric,  # type: ignore[arg-type]
+        threshold=float(threshold),
+        window_minutes=window_minutes,
+        cooldown_minutes=cooldown_minutes,
+        enabled=True,
+        notifier_ids=list(notifier_ids or []),
+        created_at=now,
+        updated_at=now,
+        last_fired_at=None,
+    )
+    rule.validate()
+    AlertRuleStore(store).create(rule)
+    return rule.to_dict()
+
+
+def alerts_delete(rule_id: str) -> bool:
+    """Delete an alert rule.
+
+    Args:
+        rule_id: The rule's id.
+
+    Returns:
+        True when deleted.
+
+    Raises:
+        typer.Exit: code 1 with the rule id echoed when unknown.
+    """
+    from hookrelay.alerts.storage import AlertRuleStore
+
+    store = _get_storage()
+    if not AlertRuleStore(store).delete(rule_id):
+        typer.echo(f"Error: Alert rule '{rule_id}' not found.", err=True)
+        raise typer.Exit(code=1)
+    return True
+
+
+alerts_app = typer.Typer(
+    name="alerts",
+    help="Manage failure alerting rules.",
+    no_args_is_help=True,
+)
+app.add_typer(alerts_app, name="alerts")
+
+
+@alerts_app.command("list")
+def _alerts_list_cmd():
+    """List all alert rules as JSON."""
+    results = alerts_list()
+    if not results:
+        typer.echo("No alert rules found.")
+        return
+    typer.echo(json.dumps(results, indent=2, default=str))
+
+
+@alerts_app.command("create")
+def _alerts_create_cmd(
+    name: str = typer.Argument(..., help="Rule name"),
+    scope: str = typer.Option("all", "--scope", "-s", help="all or endpoint"),
+    metric: str = typer.Option(
+        "success_rate_below", "--metric", "-m",
+        help="success_rate_below | consecutive_failures | dlq_depth_above",
+    ),
+    threshold: float = typer.Option(..., "--threshold", "-t", help="Crossing threshold"),
+    endpoint_id: str | None = typer.Option(None, "--endpoint-id", "-e", help="Endpoint filter"),
+    window_minutes: int = typer.Option(15, "--window-minutes", "-w", help="Rolling window in minutes"),
+    cooldown_minutes: int = typer.Option(15, "--cooldown-minutes", "-c", help="Fire cooldown in minutes"),
+    notifier_ids: list[str] | None = typer.Option(None, "--notifier", "-n", help="Notifier id (repeatable)"),  # noqa: B008
+):
+    """Create an alert rule and print its JSON."""
+    try:
+        result = alerts_create(
+            name=name, scope=scope, metric=metric, threshold=threshold,
+            endpoint_id=endpoint_id, window_minutes=window_minutes,
+            cooldown_minutes=cooldown_minutes, notifier_ids=notifier_ids,
+        )
+    except ValueError as exc:
+        typer.echo(f"Error: {exc}", err=True)
+        raise typer.Exit(code=1)
+    typer.echo(json.dumps(result, indent=2, default=str))
+
+
+@alerts_app.command("delete")
+def _alerts_delete_cmd(
+    rule_id: str = typer.Argument(..., help="Alert rule ID"),
+):
+    """Delete an alert rule."""
+    alerts_delete(rule_id=rule_id)
+    typer.echo(f"Alert rule '{rule_id}' deleted.")
+
+
+# ============================================================
+# Insights commands (delivery insights, v1.7.0)
+# ============================================================
+
+
+def insights_endpoints(window: str = "24h") -> list[dict]:
+    """Return per-endpoint delivery insights for ``window``.
+
+    Usage: hookrelay insights endpoints [--window 24h]
+    """
+    from hookrelay.insights.service import InsightsService, parse_window
+
+    store = _get_storage()
+    parse_window(window)
+    return InsightsService(store).endpoints(window)
+
+
+def insights_timeseries(
+    metric: str = "deliveries", window: str = "24h", bucket: str = "hourly"
+) -> list[dict]:
+    """Return bucketed delivery time series.
+
+    Usage: hookrelay insights timeseries [--metric deliveries] [--window 24h] [--bucket hourly]
+    """
+    from hookrelay.insights.service import InsightsService, parse_bucket, parse_window
+
+    store = _get_storage()
+    parse_window(window)
+    parse_bucket(bucket)
+    return InsightsService(store).timeseries(metric, window, bucket)
+
+
+insights_app = typer.Typer(
+    name="insights",
+    help="Delivery insights: per-endpoint stats and time series.",
+    no_args_is_help=True,
+)
+app.add_typer(insights_app, name="insights")
+
+
+@insights_app.command("endpoints")
+def _insights_endpoints_cmd(
+    window: str = typer.Option("24h", "--window", "-w", help="Rolling window (15m, 1h, 24h, 7d)"),
+):
+    """Print per-endpoint delivery insights as JSON."""
+    try:
+        result = insights_endpoints(window=window)
+    except ValueError:
+        typer.echo("Error: window must be one of 15m, 1h, 24h, 7d", err=True)
+        raise typer.Exit(code=1)
+    typer.echo(json.dumps(result, indent=2, default=str))
+
+
+@insights_app.command("timeseries")
+def _insights_timeseries_cmd(
+    metric: str = typer.Option("deliveries", "--metric", "-m", help="deliveries | success_rate | latency_p95"),
+    window: str = typer.Option("24h", "--window", "-w", help="Rolling window (15m, 1h, 24h, 7d)"),
+    bucket: str = typer.Option("hourly", "--bucket", "-b", help="Bucket size (hourly, daily)"),
+):
+    """Print bucketed delivery time series as JSON."""
+    try:
+        result = insights_timeseries(metric=metric, window=window, bucket=bucket)
+    except ValueError as exc:
+        typer.echo(f"Error: {exc}", err=True)
+        raise typer.Exit(code=1)
+    typer.echo(json.dumps(result, indent=2, default=str))

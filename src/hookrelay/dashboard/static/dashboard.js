@@ -251,4 +251,171 @@
         });
     });
 
+    // ---- Alerts tab (dashboard/alerts.html) ----
+    const alertsBanner = document.getElementById('alerts-banner');
+    function showAlertsBanner(message) {
+        if (!alertsBanner) return;
+        alertsBanner.textContent = message;
+        alertsBanner.hidden = false;
+        setTimeout(function () { alertsBanner.hidden = true; }, 6000);
+    }
+    const ruleForm = document.getElementById('rule-form');
+    if (ruleForm) {
+        ruleForm.addEventListener('submit', function (event) {
+            event.preventDefault();
+            const scope = document.getElementById('rule-scope').value;
+            const payload = {
+                name: document.getElementById('rule-name').value,
+                scope: scope,
+                metric: document.getElementById('rule-metric').value,
+                threshold: parseFloat(document.getElementById('rule-threshold').value),
+                window_minutes: parseInt(document.getElementById('rule-window').value, 10),
+                cooldown_minutes: parseInt(document.getElementById('rule-cooldown').value, 10),
+                enabled: true,
+                notifier_ids: Array.from(document.getElementById('rule-notifiers').selectedOptions).map(function (option) { return option.value; })
+            };
+            if (scope === 'endpoint') payload.endpoint_id = document.getElementById('rule-endpoint').value || null;
+            fetch('/api/alerts/rules', {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            }).then(async function (response) {
+                const data = await response.json().catch(function () { return {}; });
+                if (!response.ok) throw new Error(data.detail || 'Could not create rule');
+                window.location.assign('/dashboard/alerts');
+            }).catch(function (error) { showAlertsBanner(error.message); });
+        });
+    }
+    document.querySelectorAll('.rule-toggle').forEach(function (button) {
+        button.addEventListener('click', function () {
+            const ruleId = button.dataset.ruleId;
+            const enabled = button.dataset.enabled === 'true';
+            fetch('/api/alerts/rules/' + encodeURIComponent(ruleId), {
+                method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ enabled: !enabled })
+            }).then(async function (response) {
+                const data = await response.json().catch(function () { return {}; });
+                if (!response.ok) throw new Error(data.detail || 'Could not toggle rule');
+                window.location.assign('/dashboard/alerts');
+            }).catch(function (error) { showAlertsBanner(error.message); });
+        });
+    });
+    document.querySelectorAll('.rule-delete').forEach(function (button) {
+        button.addEventListener('click', function () {
+            const ruleId = button.dataset.ruleId;
+            if (!window.confirm('Delete alert rule "' + button.dataset.name + '"?')) return;
+            fetch('/api/alerts/rules/' + encodeURIComponent(ruleId), { method: 'DELETE' })
+                .then(function (response) {
+                    if (!response.ok) return response.json().then(function (data) { throw new Error(data.detail || 'Could not delete rule'); });
+                    window.location.assign('/dashboard/alerts');
+                })
+                .catch(function (error) { showAlertsBanner(error.message); });
+        });
+    });
+
+    // ---- Insights view (dashboard/insights.html) ----
+    const insightsChart = document.getElementById('insights-chart');
+    const endpointsBody = document.getElementById('endpoints-body');
+    const insightsBanner = document.getElementById('insights-banner');
+    function showInsightsBanner(message) {
+        if (!insightsBanner) return;
+        insightsBanner.textContent = message;
+        insightsBanner.hidden = false;
+        setTimeout(function () { insightsBanner.hidden = true; }, 6000);
+    }
+    function escHtml(value) {
+        const div = document.createElement('div');
+        div.textContent = String(value == null ? '' : value);
+        return div.innerHTML;
+    }
+    function renderInsightsChart(canvas, buckets) {
+        const ctx = canvas.getContext('2d');
+        const width = canvas.width;
+        const height = canvas.height;
+        const pad = 36;
+        ctx.clearRect(0, 0, width, height);
+        if (!buckets || !buckets.length) {
+            ctx.fillStyle = '#8a8f98';
+            ctx.font = '14px sans-serif';
+            ctx.fillText('No delivery data in this window.', pad, height / 2);
+            return;
+        }
+        const delivered = buckets.map(function (b) { return b.delivered || 0; });
+        const failed = buckets.map(function (b) { return b.failed || 0; });
+        const max = Math.max(1, delivered.concat(failed).reduce(function (a, b) { return Math.max(a, b); }, 0));
+        const plotW = width - pad * 2;
+        const plotH = height - pad * 2;
+        function x(i) { return pad + (buckets.length > 1 ? (i / (buckets.length - 1)) * plotW : 0); }
+        function y(v) { return pad + plotH - (v / max) * plotH; }
+        // grid + labels
+        ctx.strokeStyle = '#e2e4e8';
+        ctx.fillStyle = '#8a8f98';
+        ctx.font = '11px sans-serif';
+        for (let g = 0; g <= 4; g += 1) {
+            const gy = pad + (g / 4) * plotH;
+            ctx.beginPath();
+            ctx.moveTo(pad, gy);
+            ctx.lineTo(width - pad, gy);
+            ctx.stroke();
+            ctx.fillText(String(Math.round(max * (1 - g / 4))), 4, gy + 4);
+        }
+        function line(values, color) {
+            ctx.strokeStyle = color;
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            values.forEach(function (value, i) {
+                if (i === 0) ctx.moveTo(x(i), y(value));
+                else ctx.lineTo(x(i), y(value));
+            });
+            ctx.stroke();
+        }
+        line(delivered, '#2f855a');
+        line(failed, '#c53030');
+        // legend
+        ctx.font = '12px sans-serif';
+        ctx.fillStyle = '#2f855a';
+        ctx.fillText('— delivered', pad, 16);
+        ctx.fillStyle = '#c53030';
+        ctx.fillText('— failed', pad + 90, 16);
+    }
+    if (insightsChart) {
+        fetch('/api/insights/timeseries?metric=deliveries&window=24h&bucket=hourly')
+            .then(async function (response) {
+                const data = await response.json().catch(function () { return {}; });
+                if (!response.ok) throw new Error(data.detail || 'Could not load insights chart');
+                renderInsightsChart(insightsChart, data.buckets || []);
+            })
+            .catch(function (error) { showInsightsBanner(error.message); });
+    }
+    if (endpointsBody) {
+        fetch('/api/insights/endpoints?window=24h')
+            .then(async function (response) {
+                const data = await response.json().catch(function () { return {}; });
+                if (!response.ok) throw new Error(data.detail || 'Could not load endpoint insights');
+                const rows = data.endpoints || [];
+                if (!rows.length) {
+                    endpointsBody.innerHTML = '<tr><td colspan="7">No delivery data in this window.</td></tr>';
+                    return;
+                }
+                rows.forEach(function (ep) {
+                    const tr = document.createElement('tr');
+                    const cells = [
+                        ep.endpoint_id,
+                        String(ep.deliveries),
+                        ep.success_rate == null ? '—' : Math.round(ep.success_rate * 100) + '%',
+                        ep.p50_ms == null ? '—' : Math.round(ep.p50_ms) + ' ms',
+                        ep.p95_ms == null ? '—' : Math.round(ep.p95_ms) + ' ms',
+                        ep.p99_ms == null ? '—' : Math.round(ep.p99_ms) + ' ms',
+                        ep.top_failure_reason || '—'
+                    ];
+                    cells.forEach(function (cell) {
+                        const td = document.createElement('td');
+                        td.textContent = cell;
+                        tr.appendChild(td);
+                    });
+                    endpointsBody.appendChild(tr);
+                });
+            })
+            .catch(function (error) { showInsightsBanner(error.message); });
+    }
+
 })();
