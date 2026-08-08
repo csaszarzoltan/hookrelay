@@ -18,7 +18,9 @@ External Webhook → Relay Server ──→ WebSocket Tunnel → hookrelay CLI �
                                         ├── History Browser (filter/search)
                                         ├── Payload Inspector
                                         ├── Request Replay
-                                        └── Bins (capture endpoints + live feed)
+                                        ├── Bins (capture endpoints + live feed)
+                                        ├── Alerts (alert rules + notifiers)
+                                        └── Insights (delivery stats + time series)
 ```
 
 ## Prerequisites
@@ -67,7 +69,7 @@ curl http://localhost:8000/health
 Returns:
 
 ```json
-{"status": "ok", "version": "1.6.0"}
+{"status": "ok", "version": "1.7.0"}
 ```
 
 ## Forwarding Webhooks
@@ -91,6 +93,8 @@ Open **http://localhost:8000/dashboard/** in your browser:
 - **Payload Inspector** — detailed view of headers, query params, and body
 - **Request Replay** — one-click replay from the dashboard UI
 - **Bins** — create capture bins, copy their URLs, and watch a live request feed
+- **Alerts** — create alert rules, attach Slack/email/webhook notifiers, toggle rules on/off
+- **Insights** — per-endpoint delivery stats and a time-series chart
 
 ![Dashboard](screenshots/dashboard.png)
 *Figure: Hookrelay Web Dashboard — Live Feed view*
@@ -191,6 +195,12 @@ inbound signature verification. Start with the per-feature guides:
 
 Hookrelay 1.6 adds [webhook capture bins](capture-bins-1.6.md) — persistent
 test endpoints with one-click forward/replay.
+
+Hookrelay 1.7 adds [failure alerting](alerting.md) — threshold rules
+(`success_rate_below`, `consecutive_failures`, `dlq_depth_above`) with
+Slack/email/webhook notifiers, cooldown, and paused rules — plus the
+[delivery insights API](insights-api.md) (`/api/insights/endpoints` and
+`/api/insights/timeseries`) with 422 validation on window/bucket.
 
 Every guide pairs with a runnable example under [`../examples/`](../examples/),
 for example `python examples/hmac_verification.py`.

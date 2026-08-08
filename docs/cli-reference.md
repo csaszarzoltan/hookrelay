@@ -162,6 +162,10 @@ The server mounts:
 - **Webhook ingestion** at `POST http://localhost:8000/webhook/{channel}`
 - **Bin capture endpoint** at `GET/POST/PUT/PATCH/DELETE http://localhost:8000/bin/{bin_id}` (v1.6.0+, public)
 - **Bins dashboard** at `http://localhost:8000/dashboard/bins` (v1.6.0+)
+- **Alerts API** at `/api/alerts/rules`, `/api/alerts/notifiers`, `/api/alerts/status`, `/api/alerts/history` (v1.7.0)
+- **Alerts dashboard** at `http://localhost:8000/dashboard/alerts` (v1.7.0)
+- **Insights API** at `/api/insights/endpoints`, `/api/insights/timeseries` (v1.7.0)
+- **Insights dashboard** at `http://localhost:8000/dashboard/insights` (v1.7.0)
 - **Relay WebSocket** at `ws://localhost:8000/ws/{channel}`
 - **History API** at `GET http://localhost:8000/api/history`
 - **Replay API** at `POST http://localhost:8000/api/replay/{request_id}`
@@ -205,6 +209,67 @@ Inspect and requeue dead-letter entries:
 hookrelay dlq list [--endpoint-id ID] [--limit N]
 hookrelay dlq requeue <entry_id>
 ```
+
+## `hookrelay alerts`
+
+Manage failure alert rules (v1.7.0). Rules are evaluated by the server's
+background loop (~60s) over rolling windows of stored delivery history;
+see [`docs/alerting.md`](alerting.md).
+
+```bash
+hookrelay alerts list
+hookrelay alerts create <name> [options]
+hookrelay alerts delete <rule_id>
+```
+
+**Options for `create`:**
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `--scope`, `-s` | `all` | `all` (every endpoint) or `endpoint` |
+| `--endpoint-id`, `-e` | — | Endpoint filter (required when `--scope endpoint`) |
+| `--metric`, `-m` | `success_rate_below` | `success_rate_below` \| `consecutive_failures` \| `dlq_depth_above` |
+| `--threshold`, `-t` | — | Crossing threshold (required) |
+| `--window-minutes`, `-w` | `15` | Rolling evaluation window |
+| `--cooldown-minutes`, `-c` | `15` | Minimum time between two fires |
+| `--notifier`, `-n` | — | Notifier id to fan out to (repeatable) |
+
+**Examples:**
+```bash
+hookrelay alerts list
+hookrelay alerts create checkout-success --metric success_rate_below --threshold 0.9 --window-minutes 60
+hookrelay alerts create billing-dlq --metric dlq_depth_above --threshold 5 --notifier slack-1
+hookrelay alerts delete 8ee685a4e8bb4e8abca4aa3157099d34
+```
+
+Rules are printed as JSON; invalid values exit 1 with the validation
+message on stderr (`Error: success_rate_below threshold must be in (0, 1]`).
+
+## `hookrelay insights`
+
+Query delivery insights (v1.7.0): per-endpoint stats and bucketed time
+series, printed as JSON. See [`docs/insights-api.md`](insights-api.md).
+
+```bash
+hookrelay insights endpoints [--window 24h]
+hookrelay insights timeseries [--metric deliveries] [--window 24h] [--bucket hourly]
+```
+
+**Options:**
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `--window`, `-w` | `24h` | Rolling window: `15m`, `1h`, `24h`, `7d` |
+| `--metric`, `-m` | `deliveries` | `deliveries` \| `success_rate` \| `latency_p95` (timeseries only) |
+| `--bucket`, `-b` | `hourly` | Bucket size: `hourly`, `daily` (timeseries only) |
+
+**Examples:**
+```bash
+hookrelay insights endpoints --window 7d
+hookrelay insights timeseries --metric success_rate --window 24h --bucket hourly
+```
+
+Invalid values exit 1, e.g. `Error: window must be one of 15m, 1h, 24h, 7d`.
 
 
 ## Authentication environment variable

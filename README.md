@@ -4,13 +4,33 @@
 
 [![GitHub Release](https://img.shields.io/github/v/release/csaszarzoltan/hookrelay?logo=github)](https://github.com/csaszarzoltan/hookrelay/releases)
 [![Python](https://img.shields.io/badge/python-3.11+-blue?logo=python)](https://python.org)
-[![Tests](https://img.shields.io/badge/tests-871%20passing-brightgreen)](https://github.com/csaszarzoltan/hookrelay/actions)
+[![Tests](https://img.shields.io/badge/tests-1081%20passing-brightgreen)](https://github.com/csaszarzoltan/hookrelay/actions)
 [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 [![Dashboard](https://img.shields.io/badge/feature-dashboard-blueviolet)](#web-dashboard)
 
 ---
 
 ## Features
+
+### What is new in 1.7.0
+
+- **Failure alerting** — declarative alert rules (`success_rate_below`,
+  `consecutive_failures`, `dlq_depth_above`) evaluated over rolling windows
+  of stored delivery history by a ~60s background loop; per-rule cooldown
+  prevents alert storms and paused rules never fire
+- **Notifiers** — Slack incoming-webhook, SMTP email, and generic outbound
+  webhook channels, every outbound URL SSRF-guarded at save and at fire;
+  secrets (Slack webhook token, SMTP password) are never exposed by listings
+- **Delivery insights API** — `GET /api/insights/endpoints` (per-endpoint
+  deliveries, success rate, p50/p95/p99 latency, top failure reason) and
+  `GET /api/insights/timeseries` (zero-filled hourly/daily buckets), with
+  422 validation on window/bucket
+- **Alerts + insights CLI** — `hookrelay alerts list|create|delete` and
+  `hookrelay insights endpoints|timeseries`
+- **Dashboard** — `/dashboard/alerts` tab (rules list, create form,
+  enable/disable toggle, delete) and `/dashboard/insights` view (endpoint
+  stats table + canvas time-series chart)
+- **1081 passing tests and zero failures**
 
 ### What is new in 1.6.0
 
@@ -284,6 +304,63 @@ hookrelay bin forward <request_id> --to https://example.com/webhook
   SSRF behaviour + Python API) and the runnable
   [`examples/capture_bins.py`](examples/capture_bins.py).
 
+## Failure alerting & delivery insights (v1.7.0)
+
+Hookrelay 1.7.0 tells you when delivery breaks: threshold rules evaluated
+over rolling windows of stored delivery history, fanned out to Slack,
+email, or an outbound webhook.
+
+Create a rule — alert when the checkout endpoint's success rate drops
+below 90% over the last hour:
+
+```bash
+curl -X POST http://localhost:8000/api/alerts/rules \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "checkout success rate",
+    "scope": "endpoint",
+    "endpoint_id": "ep-checkout",
+    "metric": "success_rate_below",
+    "threshold": 0.9,
+    "window_minutes": 60,
+    "cooldown_minutes": 15
+  }'
+```
+
+Or from the CLI:
+
+```bash
+hookrelay alerts create checkout-success \
+  --metric success_rate_below --threshold 0.9 --window-minutes 60
+```
+
+Then point a notifier at your channel (Slack, SMTP, or a generic webhook)
+and attach it to the rule; the evaluator loop (default 60s) fires the
+notifier when the threshold is crossed and the per-rule cooldown (default
+15 min) has elapsed. Paused rules never fire. Full reference — metric
+types, scopes, cooldown, paused rules, notifier configuration, fire
+history and audit — is in the [alerting guide](docs/alerting.md).
+
+Delivery insights give you per-endpoint stats and time series over the
+same data:
+
+```bash
+curl "http://localhost:8000/api/insights/endpoints?window=24h"
+curl "http://localhost:8000/api/insights/timeseries?metric=deliveries&window=24h&bucket=hourly"
+```
+
+```bash
+hookrelay insights endpoints --window 24h
+hookrelay insights timeseries --metric success_rate --window 24h --bucket hourly
+```
+
+Invalid windows/buckets return 422 with a `{"detail": ...}` body. See the
+[insights API guide](docs/insights-api.md) for request/response examples,
+failure-reason classification, and validation behaviour. The dashboard
+**Alerts** tab (`/dashboard/alerts`) manages rules with a create form,
+enable/disable toggles, and delete; the **Insights** view
+(`/dashboard/insights`) renders the stats table and a time-series chart.
+
 ## CLI Commands
 
 | Command | Description |
@@ -299,6 +376,11 @@ hookrelay bin forward <request_id> --to https://example.com/webhook
 | `hookrelay bin list` | List all capture bins |
 | `hookrelay bin inspect <bin_id>` | Show bin details and captured requests |
 | `hookrelay bin forward <request_id> --to <url>` | Forward a captured request to a URL (SSRF-guarded) |
+| `hookrelay alerts list` | List all alert rules |
+| `hookrelay alerts create <name> --metric <m> --threshold <t>` | Create an alert rule (v1.7.0) |
+| `hookrelay alerts delete <rule_id>` | Delete an alert rule (v1.7.0) |
+| `hookrelay insights endpoints [--window 24h]` | Per-endpoint delivery stats as JSON (v1.7.0) |
+| `hookrelay insights timeseries [--metric deliveries] [--window 24h] [--bucket hourly]` | Bucketed delivery time series as JSON (v1.7.0) |
 
 ### Options
 
@@ -325,6 +407,8 @@ hookrelay/
 │       ├── server.py             # FastAPI server (dashboard + relay + APIs)
 │       ├── ssrf.py               # SSRF protection
 │       ├── storage.py            # SQLite storage with FTS5
+│       ├── alerts/               # Failure alerting (rules, storage, evaluator, notifiers, API)
+│       ├── insights/             # Delivery insights (service, API)
 │       ├── bins/                 # Webhook capture bins (service, forward, API, CLI, dashboard)
 │       ├── config/               # Per-endpoint config (RetryPolicy, headers)
 │       ├── delivery/             # Retry queue, DLQ, idempotency, tracking
@@ -366,6 +450,8 @@ hookrelay/
 │   ├── endpoint-config-1.5.md    # Per-endpoint configuration guide
 │   ├── dashboard-metrics-1.5.md  # Dashboard delivery metrics guide
 │   ├── capture-bins-1.6.md       # Webhook capture bins guide
+│   ├── alerting.md               # Alert rules, evaluator, notifiers guide (v1.7.0)
+│   ├── insights-api.md           # Delivery insights API reference (v1.7.0)
 │   └── screenshots/              # Dashboard screenshots
 ├── examples/
 │   ├── basic_relay.py            # Local receiver + relay flow

@@ -202,6 +202,38 @@ target URL with one click. Captured requests persist even when no dashboard
 or WebSocket client is connected. Full reference (REST API, SSRF behaviour,
 Python API): [`capture-bins-1.6.md`](capture-bins-1.6.md).
 
+## Alerts tab (v1.7.0+)
+
+**URL:** `/dashboard/alerts`
+
+Manage failure alert rules and notifiers:
+
+- **Rules list** — name, scope, metric, threshold, window, cooldown,
+  enabled badge, and last-fired timestamp for every rule
+- **Create form** — metric select (`success_rate_below`,
+  `consecutive_failures`, `dlq_depth_above`), scope select, threshold,
+  window/cooldown minutes, and notifier multi-select
+- **Enable/disable toggle** — pauses a rule without deleting it (paused
+  rules never fire)
+- **Delete button** — removes a rule with confirmation
+
+All mutations go through the `/api/alerts/*` endpoints via `fetch()`;
+invalid submissions surface an alert banner (`role="alert"`). Full
+reference: [`alerting.md`](alerting.md).
+
+## Insights view (v1.7.0+)
+
+**URL:** `/dashboard/insights`
+
+Read-only delivery analytics rendered from the insights API:
+
+- **Endpoint stats table** — per-endpoint deliveries, success rate,
+  p50/p95/p99 latency, and top failure reason over the selected window
+- **Time-series chart** — canvas-drawn success rate and deliveries over
+  time (hourly/daily buckets)
+
+Full reference (REST API, validation behaviour): [`insights-api.md`](insights-api.md).
+
 ---
 
 ## API Endpoints (Dashboard-relevant)
@@ -213,6 +245,18 @@ Python API): [`capture-bins-1.6.md`](capture-bins-1.6.md).
 | `GET` | `/dashboard/inspect/{id}` | Payload Inspector page |
 | `GET` | `/dashboard/replay/{id}` | Request Replay page |
 | `GET` | `/dashboard/bins` | Bins view — capture bins + live feed (v1.6.0+) |
+| `GET` | `/dashboard/alerts` | Alerts tab — rules list + create form + toggles (v1.7.0+) |
+| `GET` | `/dashboard/insights` | Insights view — endpoint stats + time-series chart (v1.7.0+) |
+| `GET` | `/api/alerts/rules` | List alert rules (v1.7.0+) |
+| `POST` | `/api/alerts/rules` | Create an alert rule (v1.7.0+) |
+| `PATCH` | `/api/alerts/rules/{rule_id}` | Update a rule (e.g. `{"enabled": false}`) (v1.7.0+) |
+| `DELETE` | `/api/alerts/rules/{rule_id}` | Delete a rule (v1.7.0+) |
+| `GET/POST` | `/api/alerts/notifiers` | List/create notifiers (secrets redacted) (v1.7.0+) |
+| `POST` | `/api/alerts/notifiers/{notifier_id}/test` | Send a synthetic test alert (v1.7.0+) |
+| `GET` | `/api/alerts/status` | Evaluator status (v1.7.0+) |
+| `GET` | `/api/alerts/history` | Fired-alert history (v1.7.0+) |
+| `GET` | `/api/insights/endpoints` | Per-endpoint delivery stats (v1.7.0+) |
+| `GET` | `/api/insights/timeseries` | Bucketed delivery time series (v1.7.0+) |
 | `GET` | `/dashboard/static/{file}` | Static assets (CSS, JS) |
 | `WS` | `/dashboard/ws/live` | Live monitoring WebSocket |
 | `POST` | `/api/replay/{id}` | Trigger a request replay |

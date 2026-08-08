@@ -30,7 +30,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Docs
 
-- README — `hookrelay alerts` / `hookrelay insights` CLI usage and dashboard tabs
+- README — `hookrelay alerts` / `hookrelay insights` CLI usage, v1.7.0 feature section, alerting + insights quick start, CLI command table, project structure
+- [`docs/alerting.md`](docs/alerting.md) — alert rules (metric types, scopes, threshold validation), cooldown, paused rules, fire history + audit, Slack/SMTP/outbound-webhook notifier configuration with SSRF + redaction behaviour, REST/CLI/Python examples
+- [`docs/insights-api.md`](docs/insights-api.md) — `GET /api/insights/endpoints` and `GET /api/insights/timeseries` reference with request/response examples, failure-reason classification, and 422 validation behaviour
+- `docs/getting-started.md` — dashboard navigation, health version, and Next steps updated for v1.7.0
+- `docs/cli-reference.md` — `hookrelay alerts` / `hookrelay insights` command reference and mounted API endpoints under `serve`
+- `docs/dashboard-guide.md` — Alerts tab and Insights view sections + dashboard-relevant API endpoints table
 
 ## [1.6.0] — 2026-08-05
 
