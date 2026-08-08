@@ -13,6 +13,7 @@ import smtplib
 from abc import ABC, abstractmethod
 from email.message import EmailMessage
 from typing import Any
+from urllib.parse import urlparse
 
 import requests
 
@@ -23,6 +24,10 @@ _NOTIFIER_TYPES = ("slack", "smtp", "webhook")
 # Fields that must never be echoed back by list_notifiers / the API.
 _SECRET_FIELDS = ("password",)
 
+# Slack webhook URLs embed the secret token in the path
+# (``/services/T000/B000/XXXX``) — listings must never expose it.
+_SLACK_URL_MASKED_PATH = "/services/***"
+
 _SLACK_PREFIX = "<hookrelay> "
 
 
@@ -31,6 +36,22 @@ def _check_ssrf(url: str, *, allow_private: bool = False) -> None:
     ok, reason = validate_target_url(url, allow_private=allow_private)
     if not ok:
         raise ValueError(f"URL blocked by SSRF protection: {reason}")
+
+
+def _mask_slack_webhook_url(webhook_url: str) -> str:
+    """Mask a Slack webhook URL so its secret path token never leaks.
+
+    Keeps ``scheme://host`` and replaces the path with a fixed masked
+    placeholder (``https://hooks.slack.com/services/***``). Falls back
+    to ``"<redacted>"`` when the URL cannot be parsed.
+    """
+    try:
+        parsed = urlparse(webhook_url)
+        if parsed.scheme and parsed.netloc:
+            return f"{parsed.scheme}://{parsed.netloc}{_SLACK_URL_MASKED_PATH}"
+    except ValueError:
+        pass
+    return "<redacted>"
 
 
 class Notifier(ABC):
@@ -64,7 +85,17 @@ class SlackNotifier(Notifier):
         self.webhook_url = webhook_url
 
     def send(self, alert: dict) -> bool:
-        """POST ``{"text": "<hookrelay> <message>"}`` to the webhook."""
+        """POST ``{"text": "<hookrelay> <message>}`` to the webhook.
+
+        The webhook URL is re-validated through the SSRF guard at fire
+        time (the guard re-resolves DNS on every call, so a URL that was
+        safe at save time is re-checked right before the POST); an unsafe
+        URL makes ``send`` fail closed and return False.
+        """
+        try:
+            self.validate()
+        except ValueError:
+            return False
         message = str(alert.get("message") or "Hookrelay alert")
         try:
             response = requests.post(
@@ -184,7 +215,15 @@ class SmtpNotifier(Notifier):
 
 
 class WebhookNotifier(Notifier):
-    """Send alerts to a generic outbound webhook as JSON."""
+    """Send alerts to a generic outbound webhook as JSON.
+
+    ``allow_private`` is a test-only override: it bypasses the SSRF
+    guard so tests can point a notifier at a local HTTP server. It is
+    NOT accepted from the public API (``validate_notifier_payload``
+    never reads it from a payload) and is never persisted to settings —
+    every notifier rebuilt from settings therefore has
+    ``allow_private=False`` and stays SSRF-guarded at save and fire.
+    """
 
     type: str = "webhook"
 
@@ -199,7 +238,17 @@ class WebhookNotifier(Notifier):
         self.allow_private = allow_private
 
     def send(self, alert: dict) -> bool:
-        """POST the alert envelope with redirects disabled (SSRF-safe)."""
+        """POST the alert envelope with redirects disabled (SSRF-safe).
+
+        The target URL is re-validated through the SSRF guard at fire
+        time (re-resolving DNS right before the POST, so a URL that was
+        safe at save time is checked again); an unsafe target makes
+        ``send`` fail closed and return False.
+        """
+        try:
+            self.validate()
+        except ValueError:
+            return False
         try:
             response = requests.post(
                 self.url,
@@ -267,12 +316,18 @@ class NotifierRegistry:
         return results
 
     def list_notifiers(self) -> list[dict]:
-        """Return redacted notifier summaries (secrets never included)."""
+        """Return redacted notifier summaries (secrets never included).
+
+        Slack webhook URLs are masked to ``scheme://host`` + a masked
+        path so the embedded secret token is never exposed; SMTP
+        passwords are dropped entirely. The full values remain only in
+        :meth:`to_payload` (persistence) and in the live notifier object.
+        """
         result: list[dict] = []
         for notifier_id, notifier in self._notifiers.items():
             item: dict[str, Any] = {"id": notifier_id, "type": notifier.type}
             if isinstance(notifier, SlackNotifier):
-                item["webhook_url"] = notifier.webhook_url
+                item["webhook_url"] = _mask_slack_webhook_url(notifier.webhook_url)
             elif isinstance(notifier, WebhookNotifier):
                 item["url"] = notifier.url
                 item["headers"] = notifier.headers
@@ -296,7 +351,6 @@ class NotifierRegistry:
             elif isinstance(notifier, WebhookNotifier):
                 item["url"] = notifier.url
                 item["headers"] = notifier.headers
-                item["allow_private"] = notifier.allow_private
             elif isinstance(notifier, SmtpNotifier):
                 item["host"] = notifier.host
                 item["port"] = notifier.port
@@ -352,13 +406,17 @@ def validate_notifier_payload(payload: dict) -> Notifier:
             starttls=bool(payload.get("starttls", True)),
         )
     else:  # webhook
+        if "allow_private" in payload:
+            raise ValueError(
+                "allow_private is a test-only override and is not accepted "
+                "via the API; use a public target URL"
+            )
         url = payload.get("url")
         if not url:
             raise ValueError("url is required for webhook notifiers")
         notifier = WebhookNotifier(
             str(url),
             headers=dict(payload.get("headers") or {}),
-            allow_private=bool(payload.get("allow_private", False)),
         )
     notifier.validate()
     return notifier

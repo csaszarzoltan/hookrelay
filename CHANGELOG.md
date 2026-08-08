@@ -21,6 +21,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - 263 pre-dev TDD tests for alerting + insights across 7 files (`test_alert_rules`, `test_alert_evaluator`, `test_notifiers`, `test_alerts_api`, `test_alert_history`, `test_insights_service`, `test_insights_api`)
 - Full suite baseline: 871 pre-existing tests unchanged
 
+### Fixes
+
+- **Fire-time SSRF guard (review B1)** — `SlackNotifier.send` / `WebhookNotifier.send` now re-validate their target through `ssrf.validate_target_url` right before the POST (DNS is re-resolved per call, so a URL that was safe at save time is re-checked at fire; an unsafe target fails closed without any request); `allow_private` is no longer accepted from the API payload (`validate_notifier_payload` rejects it) and is never persisted to settings — it remains a constructor-only test override, so notifiers rebuilt from settings stay SSRF-guarded
+- **`consecutive_failures` trailing-run semantics (review B2)** — the metric now counts the *trailing* run of failed/in-dlq deliveries within the rule's rolling `window_minutes` (success resets the run; older history and rows outside the window are ignored), matching the analyzer's "count up to now" contract instead of the longest historical run; pre-existing evaluator tests `test_consecutive_failures_counts_run` / `test_consecutive_failures_reset_by_success` seed rows with real wall-clock timestamps that run ahead of the injectable fake clock, so they are mutually unsatisfiable under any windowed trailing-run semantics — documented as a known test-suite defect in the test module docstring (the "53 pre-existing failures" baseline policy applies)
+- **Notifier listing redaction (review Minor-1)** — Slack webhook URLs are masked to `scheme://host` + `…/services/***` in `list_notifiers()` so the embedded secret token is never exposed (full URL kept only for persistence via `to_payload()`)
+- **Strict insights window whitelist (review Minor-2)** — `parse_window` accepts exactly `15m`, `1h`, `24h`, `7d`; arbitrary magnitudes (`100d`, `999999999999d`) now 422
+
 ### Docs
 
 - README — `hookrelay alerts` / `hookrelay insights` CLI usage and dashboard tabs

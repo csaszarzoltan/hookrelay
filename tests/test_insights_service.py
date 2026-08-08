@@ -210,6 +210,14 @@ class TestWindowParsing:
         with pytest.raises(ValueError):
             parse_window(window)
 
+    @pytest.mark.parametrize("window", ["100d", "999999999999d", "16m", "2h", "8d"])
+    def test_parse_window_rejects_arbitrary_magnitudes(self, window):
+        """Regression (review Minor-2): only the four literal tokens are valid."""
+        from hookrelay.insights.service import parse_window
+
+        with pytest.raises(ValueError):
+            parse_window(window)
+
 
 class TestBucketParsing:
     def test_parse_bucket_valid(self):

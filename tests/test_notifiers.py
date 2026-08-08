@@ -357,6 +357,63 @@ class TestWebhookNotifierBehavioral:
         except NotImplementedError:
             pytest.skip("RED phase — WebhookNotifier.validate stub not implemented yet")
 
+    def test_send_rechecks_ssrf_at_fire_time(self, monkeypatch):
+        """Regression (review B1): send() re-validates the URL via the guard.
+
+        A metadata-IP webhook must fail closed without any network I/O:
+        the requests.post stand-in records calls, so a POST would be
+        observable; send() must return False without calling it.
+        """
+        from hookrelay.alerts.notifiers import WebhookNotifier
+
+        log: list[dict] = []
+        monkeypatch.setattr("requests.post", _fake_post_factory(log))
+        notifier = WebhookNotifier("http://169.254.169.254/latest/meta-data")
+        try:
+            ok = notifier.send({"message": "must not reach metadata"})
+        except NotImplementedError:
+            pytest.skip("RED phase — WebhookNotifier.send stub not implemented yet")
+        assert ok is False
+        assert log == [], "send() must not POST to an SSRF-blocked target"
+
+    def test_send_fire_time_guard_checks_after_dns_rebind_style_change(self, monkeypatch):
+        """Regression (review B1): a URL valid at save time is re-checked at fire."""
+        from hookrelay.alerts.notifiers import WebhookNotifier
+
+        log: list[dict] = []
+        monkeypatch.setattr("requests.post", _fake_post_factory(log))
+        notifier = WebhookNotifier("http://127.0.0.1:9000/hook")
+        try:
+            ok = notifier.send({"message": "x"})
+        except NotImplementedError:
+            pytest.skip("RED phase — WebhookNotifier.send stub not implemented yet")
+        assert ok is False
+        assert log == [], "private target must not be POSTed even though it validates"
+
+    def test_send_fire_time_guard_honors_test_only_override(self, monkeypatch):
+        """Regression (review B1): allow_private=True keeps send() usable in tests."""
+        from hookrelay.alerts.notifiers import WebhookNotifier
+
+        log: list[dict] = []
+        monkeypatch.setattr("requests.post", _fake_post_factory(log))
+        notifier = WebhookNotifier("http://127.0.0.1:9000/hook", allow_private=True)
+        try:
+            ok = notifier.send({"message": "hi"})
+        except NotImplementedError:
+            pytest.skip("RED phase — WebhookNotifier.send stub not implemented yet")
+        assert ok is True
+        assert len(log) == 1
+
+    def test_payload_rejects_allow_private(self):
+        """Regression (review B1): allow_private is not API-settable."""
+        from hookrelay.alerts.notifiers import validate_notifier_payload
+
+        with pytest.raises(ValueError):
+            validate_notifier_payload(
+                {"type": "webhook", "url": "https://example.com/hook",
+                 "allow_private": True}
+            )
+
 
 # ============================================================
 # Behavioral — SmtpNotifier
@@ -538,6 +595,24 @@ class TestRegistryBehavioral:
             pytest.skip("RED phase — list_notifiers stub not implemented yet")
         assert isinstance(listing, list)
         assert all(isinstance(item, dict) for item in listing)
+
+    def test_list_notifiers_redacts_slack_webhook_token(self):
+        """Regression (review Minor-1): Slack webhook path token never listed."""
+        from hookrelay.alerts.notifiers import NotifierRegistry, SlackNotifier
+
+        registry = NotifierRegistry()
+        try:
+            registry.register(
+                SlackNotifier("https://hooks.slack.com/services/T000/B000/XXXX")
+            )
+            listing = registry.list_notifiers()
+        except NotImplementedError:
+            pytest.skip("RED phase — list_notifiers stub not implemented yet")
+        assert len(listing) == 1
+        masked = listing[0]["webhook_url"]
+        assert "T000" not in masked and "B000" not in masked
+        assert "XXXX" not in masked
+        assert masked.startswith("https://hooks.slack.com")
 
 
 # ============================================================

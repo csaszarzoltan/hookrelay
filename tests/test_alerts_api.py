@@ -261,6 +261,34 @@ class TestNotifiersCrud:
         )
         assert response.status_code == 422, response.text
 
+    def test_allow_private_rejected_422(self, tmp_path, monkeypatch):
+        """Regression (review B1): allow_private is not API-settable."""
+        client, _ = _client(tmp_path, monkeypatch)
+        response = client.post(
+            "/api/alerts/notifiers",
+            json={
+                "type": "webhook",
+                "url": "https://hooks.example.com/alert",
+                "allow_private": True,
+            },
+        )
+        assert response.status_code == 422, response.text
+        assert "detail" in response.json()
+
+    def test_metadata_url_rejected_422_even_with_allow_private(self, tmp_path, monkeypatch):
+        """Regression (review B1): metadata URL + allow_private=true -> 422."""
+        client, _ = _client(tmp_path, monkeypatch)
+        response = client.post(
+            "/api/alerts/notifiers",
+            json={
+                "type": "webhook",
+                "url": "http://169.254.169.254/latest/meta-data",
+                "allow_private": True,
+            },
+        )
+        assert response.status_code == 422, response.text
+        assert "detail" in response.json()
+
     def test_list_notifiers_redacts_secrets(self, tmp_path, monkeypatch):
         client, _ = _client(tmp_path, monkeypatch)
         client.post(
@@ -277,6 +305,23 @@ class TestNotifiersCrud:
         assert "notifiers" in body
         listing = json.dumps(body)
         assert "hunter2" not in listing, "password must be redacted"
+
+    def test_list_notifiers_redacts_slack_webhook_token(self, tmp_path, monkeypatch):
+        """Regression (review Minor-1): Slack webhook path token never listed."""
+        client, _ = _client(tmp_path, monkeypatch)
+        client.post(
+            "/api/alerts/notifiers",
+            json={
+                "type": "slack",
+                "webhook_url": "https://hooks.slack.com/services/T000/B000/XXXX",
+            },
+        )
+        response = client.get("/api/alerts/notifiers")
+        assert response.status_code == 200
+        listing = json.dumps(response.json())
+        assert "T000" not in listing, "Slack webhook token must be redacted"
+        assert "B000" not in listing, "Slack webhook token must be redacted"
+        assert "XXXX" not in listing, "Slack webhook token must be redacted"
 
     def test_delete_notifier(self, tmp_path, monkeypatch):
         client, _ = _client(tmp_path, monkeypatch)

@@ -9,7 +9,6 @@ classification. Never writes. Missing tables are treated as empty data
 
 from __future__ import annotations
 
-import re
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
@@ -18,8 +17,7 @@ from hookrelay.dashboard.metrics import MetricsCollector
 from hookrelay.dashboard.success_rate import SuccessRateCalculator
 from hookrelay.storage import Storage
 
-_WINDOW_PATTERN = re.compile(r"^(\d+)([mhd])$")
-_WINDOW_MULTIPLIERS = {"m": 1, "h": 60, "d": 1440}
+_WINDOW_MULTIPLIERS = {"15m": 15, "1h": 60, "24h": 1440, "7d": 10080}
 
 _TIMEOUT_MARKERS = ("timeout", "timed out", "timedout")
 _CONNECTION_MARKERS = (
@@ -32,16 +30,16 @@ _CONNECTION_MARKERS = (
 def parse_window(window: str) -> int:
     """Convert ``15m``/``1h``/``24h``/``7d`` to minutes.
 
+    Accepts exactly the four literal window tokens of the API contract;
+    anything else (including other magnitudes like ``100d``) raises.
+
     Raises:
         ValueError: for anything else (API layer turns this into 422).
     """
-    match = _WINDOW_PATTERN.match(window.strip())
-    if not match:
+    value = _WINDOW_MULTIPLIERS.get(window.strip())
+    if value is None:
         raise ValueError("window must be one of 15m, 1h, 24h, 7d")
-    value = int(match.group(1))
-    if value < 1:
-        raise ValueError("window must be one of 15m, 1h, 24h, 7d")
-    return value * _WINDOW_MULTIPLIERS[match.group(2)]
+    return value
 
 
 def parse_bucket(bucket: str) -> int:

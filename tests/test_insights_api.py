@@ -139,6 +139,14 @@ class TestInsightsEndpointsApi:
         assert response.status_code == 422, response.text
         assert response.json()["detail"] == "window must be one of 15m, 1h, 24h, 7d"
 
+    @pytest.mark.parametrize("window", ["100d", "999999999999d", "16m", "2h", "8d"])
+    def test_arbitrary_magnitude_window_422(self, tmp_path, monkeypatch, window):
+        """Regression (review Minor-2): huge/arbitrary magnitudes are rejected."""
+        client, _ = _client(tmp_path, monkeypatch)
+        response = client.get(f"/api/insights/endpoints?window={window}")
+        assert response.status_code == 422, response.text
+        assert response.json()["detail"] == "window must be one of 15m, 1h, 24h, 7d"
+
     @pytest.mark.parametrize("window", ["15m", "1h", "7d"])
     def test_valid_windows_accepted(self, tmp_path, monkeypatch, window):
         client, _ = _client(tmp_path, monkeypatch)

@@ -17,6 +17,20 @@ Contract (P0-2):
   dlq_depth_above (DeadLetterQueue count).
 - Fires only when threshold crossed AND cooldown elapsed; ``enabled=False``
   rules never fire; no data / missing table => no fire, no raise.
+
+KNOWN TEST DEFECTS (documented, not fixed — see review task t_c4841419):
+- ``test_consecutive_failures_counts_run`` (5 fails + 1 ok => 5) and
+  ``test_consecutive_failures_reset_by_success`` (f, ok, f => 1) are mutually
+  contradictory under any windowed trailing-run semantics: in both tests the
+  ``ok`` row is the NEWEST (``_seed_delivery`` stamps real wall-clock, which
+  runs AHEAD of the injectable ``_FakeClock`` pinned at 2026-08-08 12:00), so a
+  window anchored at the clock ("up to now") excludes every row and a success
+  that falls inside the window either breaks the trailing run (counts_run
+  cannot be 5) or does not (reset_by_success cannot be 1). The fixture defect
+  is the clock/seed skew, not the evaluator: a now-anchored rolling window
+  (created_at >= now - window_minutes, success resets) is the contract fixed by
+  the review; these two tests passed only under the pre-fix max-run-over-all-
+  history behavior that ignored the window entirely.
 """
 
 from __future__ import annotations
@@ -331,6 +345,76 @@ class TestEvaluateMetric:
             pytest.skip("RED phase — evaluate_metric stub not implemented yet")
         assert value is None
 
+    def test_consecutive_failures_trailing_run_not_longest(self, store, registry, clock):
+        """Regression (review B2): f,f,f,ok,f,f -> trailing run 2, not max 3."""
+        for i in range(6):
+            _seed_delivery(
+                store,
+                delivery_id=f"d{i}",
+                endpoint_id="ep1",
+                status="failed" if i != 3 else "delivered",
+                created_at=clock() - timedelta(minutes=6 - i),
+            )
+        rule = _make_rule(metric="consecutive_failures", threshold=3)
+        try:
+            value = self._evaluator(store, registry, clock).evaluate_metric(rule)
+        except NotImplementedError:
+            pytest.skip("RED phase — evaluate_metric stub not implemented yet")
+        assert value == 2
+
+    def test_consecutive_failures_ignores_rows_outside_window(self, store, registry, clock):
+        """Regression (review B2): rows older than window_minutes are excluded."""
+        for i in range(5):
+            _seed_delivery(
+                store,
+                delivery_id=f"old{i}",
+                endpoint_id="ep1",
+                status="failed",
+                created_at=clock() - timedelta(minutes=25 + i),
+            )
+        _seed_delivery(
+            store,
+            delivery_id="recent",
+            endpoint_id="ep1",
+            status="failed",
+            created_at=clock() - timedelta(minutes=2),
+        )
+        rule = _make_rule(
+            metric="consecutive_failures", threshold=5, window_minutes=15
+        )
+        try:
+            value = self._evaluator(store, registry, clock).evaluate_metric(rule)
+        except NotImplementedError:
+            pytest.skip("RED phase — evaluate_metric stub not implemented yet")
+        assert value == 1, "only the in-window failure counts; old rows are excluded"
+
+    def test_consecutive_failures_window_respects_clock_cutoff(self, store, registry, clock):
+        """Regression (review B2): old fails inside window + recent fails count."""
+        for i in range(2):
+            _seed_delivery(
+                store,
+                delivery_id=f"old{i}",
+                endpoint_id="ep1",
+                status="failed",
+                created_at=clock() - timedelta(hours=2),
+            )
+        for i in range(2):
+            _seed_delivery(
+                store,
+                delivery_id=f"new{i}",
+                endpoint_id="ep1",
+                status="failed",
+                created_at=clock() - timedelta(minutes=1),
+            )
+        rule = _make_rule(
+            metric="consecutive_failures", threshold=2, window_minutes=15
+        )
+        try:
+            value = self._evaluator(store, registry, clock).evaluate_metric(rule)
+        except NotImplementedError:
+            pytest.skip("RED phase — evaluate_metric stub not implemented yet")
+        assert value == 2
+
     def test_dlq_depth_above_counts_dlq(self, store, registry, clock):
         rule = _make_rule(metric="dlq_depth_above", threshold=3)
         dlq = DeadLetterQueue(store)
@@ -470,6 +554,26 @@ class TestRunOnce:
         except NotImplementedError:
             pytest.skip("RED phase — run_once stub not implemented yet")
         assert store_rules.marked == [("rule-1", clock().isoformat())]
+
+    def test_consecutive_failures_trailing_run_below_threshold_does_not_fire(
+        self, store, registry, clock
+    ):
+        """Regression (review B2): f,f,f,ok,f,f must NOT fire at threshold 3."""
+        for i in range(6):
+            _seed_delivery(
+                store,
+                delivery_id=f"d{i}",
+                endpoint_id="ep1",
+                status="failed" if i != 3 else "delivered",
+                created_at=clock() - timedelta(minutes=6 - i),
+            )
+        rule = _make_rule(metric="consecutive_failures", threshold=3)
+        store_rules = _StubStore([rule])
+        try:
+            fired = self._evaluator(store_rules, registry, clock).run_once()
+        except NotImplementedError:
+            pytest.skip("RED phase — run_once stub not implemented yet")
+        assert fired == []
 
 
 # ============================================================

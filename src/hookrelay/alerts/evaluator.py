@@ -219,18 +219,31 @@ class AlertEvaluator:
         return delivered / total
 
     def _consecutive_failures(self, rule: AlertRule) -> float | None:
-        """Longest consecutive run of failed/in-dlq deliveries.
+        """Trailing consecutive run of failed/in-dlq deliveries in window.
 
-        ``consecutive_failures`` semantics: the longest contiguous run of
-        ``failed``/``in-dlq`` rows (per endpoint when scoped). A success
-        breaks a run; the metric is the maximum run length over the whole
-        history, matching the analyzer's "count up to now" contract.
+        ``consecutive_failures`` semantics: the number of most recent
+        deliveries (per endpoint when scoped) that are ``failed`` or
+        ``in-dlq``, counted within the rule's rolling ``window_minutes``
+        and only up to now — i.e. the *trailing* run, not the longest
+        run in history. Rows are considered newest-first from the most
+        recent ``created_at``; a ``delivered``/``pending`` row (or a gap
+        of no data, or a row older than the window cutoff) ends the run
+        and older rows are not counted. Matches the analyzer contract
+        \"count of consecutive failed/in-dlq deliveries up to now\".
+
+        Note: the window is anchored to the evaluator clock (``now``),
+        matching the other metrics. Rows with ``created_at`` in the
+        future relative to ``now`` are outside the \"up to now\" window
+        and never start or extend the run.
         """
         conn = self._storage_conn()
         if not _deliveries_table_exists(conn):
             return None
         params: list[Any] = []
-        conditions: list[str] = []
+        conditions = ["created_at >= ?"]
+        params.append(
+            (self._now() - timedelta(minutes=rule.window_minutes)).isoformat()
+        )
         if rule.scope == "endpoint" and rule.endpoint_id:
             conditions.append("endpoint_id = ?")
             params.append(rule.endpoint_id)
@@ -238,16 +251,15 @@ class AlertEvaluator:
         if conditions:
             query += " WHERE " + " AND ".join(conditions)
         rows = conn.execute(
-            query + " ORDER BY created_at ASC, delivery_id ASC", params
+            query + " ORDER BY created_at DESC, delivery_id DESC", params
         ).fetchall()
-        longest = current = 0
+        trailing = 0
         for row in rows:
             if row["status"] in ("failed", "in-dlq"):
-                current += 1
-                longest = max(longest, current)
+                trailing += 1
             else:
-                current = 0
-        return float(longest) if longest > 0 else None
+                break
+        return float(trailing) if trailing > 0 else None
 
     def _dlq_depth(self, rule: AlertRule) -> float | None:
         conn = self._storage_conn()
