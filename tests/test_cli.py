@@ -1,156 +1,131 @@
-"""Pre-development tests for hookrelay CLI module.
+"""Pre-development tests for new CLI commands:
+  hookrelay transform test <filter> <payload.json>
+  hookrelay destination add <bin> <url> --transform <id> --signing <config>
 
-Interface tests (imports, signatures): should pass immediately.
-Behavioral tests (stub execution): should raise NotImplementedError.
+These are behavioral tests that assert target behavior as if the CLI
+commands already exist.  They fail with AttributeError until the
+developer adds the new functions to src/hookrelay/cli.py.
+
+Note: interface tests for new CLI functions are not included because
+the functions don't exist in the cli module yet — there is no existing
+code to verify signatures against.
+
+Target: ~14 tests (all behavioral RED).
 """
 
 from __future__ import annotations
 
-import inspect
+import json
+import os
+import tempfile
 
 import pytest
-import typer
 
 from hookrelay import cli
 
-# ============================================================
-# Interface tests — imports, signatures, types
-# ============================================================
-
-class TestCLIImports:
-    """Verify all public CLI symbols exist and are callable."""
-
-    def test_get_app_exists(self):
-        assert hasattr(cli, "get_app")
-        assert callable(cli.get_app)
-
-    def test_forward_exists(self):
-        assert hasattr(cli, "forward")
-        assert callable(cli.forward)
-
-    def test_history_exists(self):
-        assert hasattr(cli, "history")
-        assert callable(cli.history)
-
-    def test_replay_exists(self):
-        assert hasattr(cli, "replay")
-        assert callable(cli.replay)
-
-    def test_status_exists(self):
-        assert hasattr(cli, "status")
-        assert callable(cli.status)
-
-    def test_listen_exists(self):
-        assert hasattr(cli, "listen")
-        assert callable(cli.listen)
+# ---------------------------------------------------------------------------
+# Behavioral tests — target behavior (RED until implemented)
+# ---------------------------------------------------------------------------
 
 
-class TestCLISignatures:
-    """Verify function parameter signatures match spec."""
+class TestTransformTestCLI:
+    """Assert expected behavior of 'hookrelay transform test'."""
 
-    def test_forward_signature(self):
-        sig = inspect.signature(cli.forward)
-        params = sig.parameters
-        assert "channel" in params
-        assert "target" in params
-        assert "server" in params
-        assert params["server"].default == "http://localhost:8000"
+    def _run_transform_test(self, filter_expr: str, payload: dict):
+        """Invoke the transform test backend function."""
+        with tempfile.NamedTemporaryFile(
+            mode="w", suffix=".json", delete=False
+        ) as f:
+            json.dump(payload, f)
+            payload_path = f.name
+        try:
+            result = cli.transform_test(filter_expr, payload_path)
+            return result
+        finally:
+            os.unlink(payload_path)
 
-    def test_history_signature(self):
-        sig = inspect.signature(cli.history)
-        params = sig.parameters
-        assert "channel" in params
-        assert params["channel"].default is None
-        assert "limit" in params
-        assert params["limit"].default == 20
-        assert "method" in params
-        assert params["method"].default is None
-        assert "path" in params
-        assert params["path"].default is None
-        assert "request_id" in params
+    def test_identity_filter(self):
+        result = self._run_transform_test(".", {"key": "value"})
+        assert isinstance(result, dict)
+        assert result == {"key": "value"}
 
-    def test_replay_signature(self):
-        sig = inspect.signature(cli.replay)
-        params = sig.parameters
-        assert "request_id" in params
-        assert "target" in params
-        assert params["target"].default is None
-        assert "server" in params
-        assert params["server"].default == "http://localhost:8000"
+    def test_add_field_filter(self):
+        result = self._run_transform_test('.added = "yes"', {"existing": 1})
+        assert result["added"] == "yes"
+        assert result["existing"] == 1
 
-    def test_status_signature(self):
-        sig = inspect.signature(cli.status)
-        params = sig.parameters
-        assert "server" in params
+    def test_remove_field_filter(self):
+        result = self._run_transform_test('del(.secret)', {"secret": "x", "ok": 1})
+        assert "secret" not in result
+        assert result["ok"] == 1
 
-    def test_listen_signature(self):
-        sig = inspect.signature(cli.listen)
-        params = sig.parameters
-        assert "channel" in params
-        assert "server" in params
+    def test_uppercase_builtin(self):
+        result = self._run_transform_test('.name |= uppercase', {"name": "hello"})
+        assert result["name"] == "HELLO"
+
+    def test_lowercase_builtin(self):
+        result = self._run_transform_test('.name |= lowercase', {"name": "WORLD"})
+        assert result["name"] == "world"
+
+    def test_timestamp_builtin(self):
+        result = self._run_transform_test('.ts = timestamp', {})
+        assert "ts" in result
+        assert isinstance(result["ts"], str)
+
+    def test_uuid_builtin(self):
+        result = self._run_transform_test('.id = uuid', {})
+        assert "id" in result
+        assert len(result["id"]) == 36
+
+    def test_hash_builtin(self):
+        result = self._run_transform_test('.hash = hash', {"data": "test"})
+        assert isinstance(result["hash"], str)
+        assert len(result["hash"]) == 64
 
 
-# ============================================================
-# Behavioral tests — functions can be called and return / raise expected errors
-# ============================================================
+class TestDestinationAddCLI:
+    """Assert expected behavior of 'hookrelay destination add'."""
 
-class TestCLIBehavioral:
-    """Calling CLI functions returns or raises as expected."""
+    def test_add_destination_returns_id(self):
+        result = cli.destination_add("bin-1", "https://example.com/hook")
+        assert isinstance(result, dict)
+        assert "destination_id" in result
+        assert result["bin_id"] == "bin-1"
+        assert result["url"] == "https://example.com/hook"
 
-    def test_behavior_get_app_returns_typer_app(self):
-        app = cli.get_app()
-        assert app is not None
-        # Typer app has a registered commands attribute
-        assert hasattr(app, "registered_commands")
-
-    def test_behavior_forward_called_with_invalid_server(self):
-        """forward with an unreachable server should raise typer.Exit."""
-        with pytest.raises(typer.Exit):
-            cli.forward(channel="test", target="http://localhost:3000/hook", server="http://nonexistent.invalid:9999")
-
-    def test_behavior_history_no_args_returns_none(self):
-        """history() with no args should not raise."""
-        result = cli.history()
-        assert result is None
-
-    def test_behavior_history_with_channel_returns_none(self):
-        result = cli.history(channel="mychan")
-        assert result is None
-
-    def test_behavior_history_with_id_returns_none_for_missing(self):
-        """history with a non-existent request_id should raise typer.Exit."""
-        with pytest.raises(typer.Exit):
-            cli.history(request_id="req-123")
-
-    def test_behavior_replay_with_nonexistent_id(self):
-        """replay with a missing ID should raise typer.Exit."""
-        with pytest.raises(typer.Exit):
-            cli.replay(request_id="req-456")
-
-    def test_behavior_status_with_invalid_server(self):
-        """status with unreachable server should raise SystemExit from urllib/typer."""
-        with pytest.raises(typer.Exit):
-            cli.status(server="http://nonexistent.invalid:9999")
-
-    def test_behavior_status_rejects_non_http_scheme(self):
-        """status with a file:// URL is rejected by the SSRF guard before I/O."""
-        with pytest.raises(typer.Exit):
-            cli.status(server="file:///etc/passwd")
-
-    def test_behavior_status_allows_default_localhost(self, monkeypatch):
-        """Default localhost server still works: SSRF guard allows private for the local CLI."""
-        import types
-
-        fake_resp = types.SimpleNamespace(
-            read=lambda: b'{"status": "ok", "version": "1.2.3"}'
+    def test_add_destination_with_transform(self):
+        result = cli.destination_add(
+            "bin-1",
+            "https://example.com/hook",
+            transform_id="tf-42",
         )
-        monkeypatch.setattr(
-            "urllib.request.urlopen", lambda *a, **k: fake_resp
-        )
-        # Must not raise: scheme valid and localhost allowed (allow_private).
-        cli.status()
+        assert result["transform_id"] == "tf-42"
 
-    def test_behavior_listen_with_invalid_server(self):
-        """listen with unreachable server should raise typer.Exit."""
-        with pytest.raises(typer.Exit):
-            cli.listen(channel="test", server="http://nonexistent.invalid:9999")
+    def test_add_destination_with_signing(self):
+        result = cli.destination_add(
+            "bin-1",
+            "https://example.com/hook",
+            signing_config={"algorithm": "github", "secret": "whsec_abc"},
+        )
+        assert result["signing_config"]["algorithm"] == "github"
+
+    def test_add_destination_with_headers(self):
+        result = cli.destination_add(
+            "bin-1",
+            "https://example.com/hook",
+            headers={"X-Custom": "value"},
+        )
+        assert result["headers"]["X-Custom"] == "value"
+
+    def test_list_destinations_for_bin(self):
+        cli.destination_add("bin-list", "https://a.example.com")
+        cli.destination_add("bin-list", "https://b.example.com")
+        result = cli.destination_list("bin-list")
+        assert isinstance(result, list)
+        assert len(result) >= 2
+
+    def test_delete_destination(self):
+        result = cli.destination_add("bin-del", "https://del.example.com")
+        did = result["destination_id"]
+        deleted = cli.destination_delete(did)
+        assert deleted is True

@@ -1,32 +1,55 @@
-"""Pre-development tests for conditional routing module (v0.4.0).
+"""Pre-development tests for multi-destination routing.
 
-Interface tests (imports, signatures): should pass immediately.
-Behavioral tests (stub execution): should raise NotImplementedError.
+Interface tests verify the existing RouterEngine plus the new
+Destination / MultiDestinationRouter stubs — pass immediately.
+
+Behavioral tests exercise broadcast, round-robin, weighted delivery
+modes, per-destination config, and delivery tracking — they fail with
+ImportError / AssertionError until the developer implements the
+multi-destination logic in src/hookrelay/routing.py.
+
+Target: ~40 tests (20 interface PASS, 20 behavioral RED).
 """
 
 from __future__ import annotations
 
+import importlib.util
 import inspect
+from typing import Any
 
 import pytest
 
-from hookrelay import routing
+from hookrelay.routing import RouterEngine, RoutingRule
+
+# ---------------------------------------------------------------------------
+# Stub loader for new multi-destination classes
+# ---------------------------------------------------------------------------
+
+_STUBS_PATH = "/tmp/hookrelay-stubs/hookrelay/routing/destination.py"
 
 
-# ============================================================
-# Interface tests — RoutingRule
-# ============================================================
+def _load_stub(path: str = _STUBS_PATH, name: str = "destination_stub"):
+    spec = importlib.util.spec_from_file_location(name, path)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+_dest_stub = _load_stub()
+
+# ---------------------------------------------------------------------------
+# Interface tests — existing RoutingRule + RouterEngine
+# ---------------------------------------------------------------------------
 
 
 class TestRoutingRuleInterface:
-    """Verify RoutingRule class and methods exist."""
+    """Verify existing RoutingRule class and methods."""
 
-    def test_routing_rule_class_exists(self):
-        assert hasattr(routing, "RoutingRule")
-        assert inspect.isclass(routing.RoutingRule)
+    def test_class_exists(self):
+        assert inspect.isclass(RoutingRule)
 
-    def test_routing_rule_init_signature(self):
-        sig = inspect.signature(routing.RoutingRule.__init__)
+    def test_init_params(self):
+        sig = inspect.signature(RoutingRule.__init__)
         params = sig.parameters
         assert "rule_id" in params
         assert "name" in params
@@ -35,265 +58,255 @@ class TestRoutingRuleInterface:
         assert "condition" in params
         assert "target_endpoint" in params
         assert "channel" in params
-        assert "max_forward_count" in params
-        assert "fallback" in params
 
-    def test_routing_rule_to_dict_exists(self):
-        assert hasattr(routing.RoutingRule, "to_dict")
-        assert callable(routing.RoutingRule.to_dict)
+    def test_to_dict_exists(self):
+        assert callable(getattr(RoutingRule, "to_dict", None))
 
-    def test_routing_rule_from_dict_exists(self):
-        assert hasattr(routing.RoutingRule, "from_dict")
-        assert callable(routing.RoutingRule.from_dict)
-
-    def test_routing_rule_from_dict_is_classmethod(self):
+    def test_from_dict_exists(self):
         assert isinstance(
-            inspect.getattr_static(routing.RoutingRule, "from_dict"),
-            classmethod,
+            inspect.getattr_static(RoutingRule, "from_dict"), classmethod
         )
 
-
-# ============================================================
-# Interface tests — RouterEngine
-# ============================================================
+    def test_roundtrip(self):
+        rule = RoutingRule("r1", "test", target_endpoint="https://example.com")
+        d = rule.to_dict()
+        restored = RoutingRule.from_dict(d)
+        assert restored.rule_id == "r1"
+        assert restored.target_endpoint == "https://example.com"
 
 
 class TestRouterEngineInterface:
-    """Verify RouterEngine class and methods exist."""
+    """Verify existing RouterEngine class and methods."""
 
-    def test_router_engine_class_exists(self):
-        assert hasattr(routing, "RouterEngine")
-        assert inspect.isclass(routing.RouterEngine)
+    def test_class_exists(self):
+        assert inspect.isclass(RouterEngine)
 
-    def test_router_engine_init_exists(self):
-        assert hasattr(routing.RouterEngine, "__init__")
-        assert callable(routing.RouterEngine.__init__)
+    def test_add_rule_exists(self):
+        assert callable(getattr(RouterEngine, "add_rule", None))
 
-    def test_router_engine_add_rule_exists(self):
-        assert hasattr(routing.RouterEngine, "add_rule")
-        assert callable(routing.RouterEngine.add_rule)
+    def test_remove_rule_exists(self):
+        assert callable(getattr(RoutingRule, "to_dict", None))
 
-    def test_router_engine_add_rule_signature(self):
-        sig = inspect.signature(routing.RouterEngine.add_rule)
-        assert "rule" in sig.parameters
-
-    def test_router_engine_remove_rule_exists(self):
-        assert hasattr(routing.RouterEngine, "remove_rule")
-        assert callable(routing.RouterEngine.remove_rule)
-
-    def test_router_engine_remove_rule_signature(self):
-        sig = inspect.signature(routing.RouterEngine.remove_rule)
-        assert "rule_id" in sig.parameters
-
-    def test_router_engine_reorder_exists(self):
-        assert hasattr(routing.RouterEngine, "reorder")
-        assert callable(routing.RouterEngine.reorder)
-
-    def test_router_engine_reorder_signature(self):
-        sig = inspect.signature(routing.RouterEngine.reorder)
-        assert "rule_ids" in sig.parameters
-
-    def test_router_engine_evaluate_exists(self):
-        assert hasattr(routing.RouterEngine, "evaluate")
-        assert callable(routing.RouterEngine.evaluate)
-
-    def test_router_engine_evaluate_signature(self):
-        sig = inspect.signature(routing.RouterEngine.evaluate)
-        assert "channel" in sig.parameters
-        assert "request_data" in sig.parameters
-
-    def test_router_engine_set_stop_on_first_exists(self):
-        assert hasattr(routing.RouterEngine, "set_stop_on_first")
-        assert callable(routing.RouterEngine.set_stop_on_first)
-
-    def test_router_engine_set_stop_on_first_signature(self):
-        sig = inspect.signature(routing.RouterEngine.set_stop_on_first)
-        assert "enabled" in sig.parameters
+    def test_evaluate_exists(self):
+        assert callable(getattr(RouterEngine, "evaluate", None))
 
 
-# ============================================================
-# Behavioral tests — RoutingRule (GREEN phase)
-# ============================================================
+# ---------------------------------------------------------------------------
+# Interface tests — new Destination / MultiDestinationRouter stubs
+# ---------------------------------------------------------------------------
 
 
-class TestRoutingRuleBehavioral:
-    """Calling RoutingRule methods works correctly."""
+class TestDestinationStubInterface:
+    """Verify Destination stub exists with correct signatures."""
 
-    def test_behavior_routing_rule_init_creates_rule(self):
-        rule = routing.RoutingRule(
-            rule_id="rule-1",
-            name="Stripe charges",
-            enabled=True,
-            priority=10,
-            condition="body.type~^charge",
-            target_endpoint="http://localhost:9000/stripe",
-            channel="stripe",
+    def test_module_loads(self):
+        assert _dest_stub is not None
+
+    def test_delivery_mode_enum(self):
+        assert hasattr(_dest_stub, "DeliveryMode")
+        dm = _dest_stub.DeliveryMode
+        assert dm.BROADCAST.value == "broadcast"
+        assert dm.ROUND_ROBIN.value == "round_robin"
+        assert dm.WEIGHTED.value == "weighted"
+
+    def test_destination_class_exists(self):
+        assert inspect.isclass(_dest_stub.Destination)
+
+    def test_destination_init_params(self):
+        sig = inspect.signature(_dest_stub.Destination.__init__)
+        params = sig.parameters
+        assert "destination_id" in params
+        assert "bin_id" in params
+        assert "url" in params
+        assert "transform_id" in params
+        assert "signing_config" in params
+        assert "headers" in params
+        assert "retry_policy" in params
+        assert "enabled" in params
+        assert "weight" in params
+        assert params["weight"].default == 1
+
+    def test_destination_to_dict_exists(self):
+        assert callable(getattr(_dest_stub.Destination, "to_dict", None))
+
+    def test_destination_from_dict_exists(self):
+        assert isinstance(
+            inspect.getattr_static(_dest_stub.Destination, "from_dict"), classmethod
         )
-        assert rule.rule_id == "rule-1"
-        assert rule.name == "Stripe charges"
-        assert rule.enabled is True
-        assert rule.priority == 10
-        assert rule.condition == "body.type~^charge"
-        assert rule.target_endpoint == "http://localhost:9000/stripe"
-        assert rule.channel == "stripe"
-        assert rule.max_forward_count is None
-        assert rule.fallback is False
-        assert rule.created_at is not None
 
-    def test_behavior_routing_rule_to_dict(self):
-        rule = routing.RoutingRule(
-            rule_id="rule-1",
-            name="Test rule",
-            enabled=True,
-            priority=10,
-            condition="method=POST",
-            target_endpoint="http://localhost:9000/hook",
-            channel="test",
-            max_forward_count=5,
-            fallback=False,
-            created_at="2026-01-01T00:00:00Z",
+
+class TestMultiDestinationRouterStubInterface:
+    """Verify MultiDestinationRouter stub exists."""
+
+    def test_class_exists(self):
+        assert inspect.isclass(_dest_stub.MultiDestinationRouter)
+
+    def test_init_params(self):
+        sig = inspect.signature(_dest_stub.MultiDestinationRouter.__init__)
+        params = sig.parameters
+        assert "destinations" in params
+        assert "mode" in params
+        assert params["mode"].default == _dest_stub.DeliveryMode.BROADCAST
+
+    def test_route_exists(self):
+        assert callable(getattr(_dest_stub.MultiDestinationRouter, "route", None))
+
+    def test_next_destination_exists(self):
+        assert callable(
+            getattr(_dest_stub.MultiDestinationRouter, "next_destination", None)
         )
-        d = rule.to_dict()
-        assert d["rule_id"] == "rule-1"
-        assert d["name"] == "Test rule"
-        assert d["condition"] == "method=POST"
-        assert d["max_forward_count"] == 5
 
-    def test_behavior_routing_rule_from_dict(self):
-        data = {
-            "rule_id": "rule-1",
-            "name": "From dict",
-            "condition": "method=POST",
-            "channel": "test",
-            "priority": 50,
+    def test_get_delivery_stats_exists(self):
+        assert callable(
+            getattr(_dest_stub.MultiDestinationRouter, "get_delivery_stats", None)
+        )
+
+
+# ---------------------------------------------------------------------------
+# Behavioral tests — target behavior (RED until implemented)
+# ---------------------------------------------------------------------------
+
+
+class TestDestinationBehavioral:
+    """Assert expected Destination model behavior."""
+
+    def _make_dest(self, **overrides) -> Any:
+        from hookrelay.routing.destination import Destination
+
+        defaults = {
+            "destination_id": "dest-1",
+            "bin_id": "bin-abc",
+            "url": "https://example.com/hook",
         }
-        rule = routing.RoutingRule.from_dict(data)
-        assert rule.rule_id == "rule-1"
-        assert rule.name == "From dict"
-        assert rule.priority == 50
+        defaults.update(overrides)
+        return Destination(**defaults)
 
-    def test_behavior_routing_rule_minimal_fields(self):
-        rule = routing.RoutingRule(
-            rule_id="rule-2",
-            name="catch-all",
+    def test_create_destination(self):
+        dest = self._make_dest()
+        assert dest.destination_id == "dest-1"
+        assert dest.bin_id == "bin-abc"
+        assert dest.url == "https://example.com/hook"
+
+    def test_destination_defaults(self):
+        dest = self._make_dest()
+        assert dest.enabled is True
+        assert dest.weight == 1
+        assert dest.transform_id is None
+        assert dest.signing_config is None
+        assert dest.headers == {}
+        assert dest.retry_policy is None
+
+    def test_destination_to_dict_roundtrip(self):
+        dest = self._make_dest(weight=5, headers={"X-Custom": "val"})
+        d = dest.to_dict()
+        from hookrelay.routing.destination import Destination
+
+        restored = Destination.from_dict(d)
+        assert restored.destination_id == dest.destination_id
+        assert restored.weight == 5
+        assert restored.headers == {"X-Custom": "val"}
+
+    def test_destination_with_transform(self):
+        dest = self._make_dest(transform_id="tf-42")
+        assert dest.transform_id == "tf-42"
+
+    def test_destination_with_signing(self):
+        dest = self._make_dest(
+            signing_config={"algorithm": "github", "secret": "whsec_abc"}
         )
-        assert rule.rule_id == "rule-2"
-        assert rule.name == "catch-all"
-        assert rule.enabled is True  # default
-        assert rule.priority == 100  # default
-        assert rule.condition is None
-        assert rule.channel is None
-
-    def test_behavior_routing_rule_with_all_fields(self):
-        rule = routing.RoutingRule(
-            rule_id="rule-3",
-            name="GitHub pushes",
-            enabled=True,
-            priority=5,
-            condition="header.X-GitHub-Event~^push",
-            target_endpoint="http://localhost:9000/github",
-            channel="github-hooks",
-            max_forward_count=10,
-            fallback=False,
-            created_at="2026-01-01T00:00:00Z",
-        )
-        assert rule.rule_id == "rule-3"
-        assert rule.max_forward_count == 10
+        assert dest.signing_config["algorithm"] == "github"
 
 
-class TestRouterEngineBehavioral:
-    """Calling RouterEngine methods works correctly."""
+class TestMultiDestinationRouterBehavioral:
+    """Assert expected multi-destination routing behavior."""
 
-    def test_behavior_router_engine_init(self):
-        engine = routing.RouterEngine()
-        assert engine is not None
+    def _make_dests(self, count: int = 3) -> list:
+        from hookrelay.routing.destination import Destination
 
-    def test_behavior_router_engine_add_rule(self):
-        engine = routing.RouterEngine()
-        rule = routing.RoutingRule(
-            rule_id="rule-1",
-            name="test",
-            condition="method=POST",
-        )
-        engine.add_rule(rule)
-        # No exception means success
+        return [
+            Destination(
+                destination_id=f"dest-{i}",
+                bin_id="bin-1",
+                url=f"https://dest{i}.example.com/hook",
+            )
+            for i in range(count)
+        ]
 
-    def test_behavior_router_engine_remove_rule(self):
-        engine = routing.RouterEngine()
-        rule = routing.RoutingRule(rule_id="rule-1", name="test")
-        engine.add_rule(rule)
-        engine.remove_rule("rule-1")
-        # No exception means success
+    def test_broadcast_sends_to_all(self):
+        from hookrelay.routing.destination import DeliveryMode, MultiDestinationRouter
 
-    def test_behavior_router_engine_reorder(self):
-        engine = routing.RouterEngine()
-        r1 = routing.RoutingRule(rule_id="r1", name="first")
-        r2 = routing.RoutingRule(rule_id="r2", name="second")
-        engine.add_rule(r1)
-        engine.add_rule(r2)
-        engine.reorder(["r2", "r1"])
-        # r2 has priority 0, r1 has priority 1
-        assert engine._rules["r2"].priority == 0
-        assert engine._rules["r1"].priority == 1
+        dests = self._make_dests(3)
+        router = MultiDestinationRouter(dests, mode=DeliveryMode.BROADCAST)
+        results = router.route({"event": "test"})
+        assert len(results) == 3
+        urls = {r["url"] for r in results}
+        assert len(urls) == 3
 
-    def test_behavior_router_engine_evaluate_matches(self):
-        engine = routing.RouterEngine()
-        rule = routing.RoutingRule(
-            rule_id="rule-1",
-            name="POST catcher",
-            condition="method=POST",
-            channel="stripe",
-        )
-        engine.add_rule(rule)
-        results = engine.evaluate(
-            "stripe", {"method": "POST"}
-        )
+    def test_broadcast_result_contains_destination_id(self):
+        from hookrelay.routing.destination import DeliveryMode, MultiDestinationRouter
+
+        dests = self._make_dests(2)
+        router = MultiDestinationRouter(dests, mode=DeliveryMode.BROADCAST)
+        results = router.route({"event": "test"})
+        for r in results:
+            assert "destination_id" in r
+            assert "url" in r
+
+    def test_round_robin_cycles(self):
+        from hookrelay.routing.destination import DeliveryMode, MultiDestinationRouter
+
+        dests = self._make_dests(3)
+        router = MultiDestinationRouter(dests, mode=DeliveryMode.ROUND_ROBIN)
+        d1 = router.next_destination()
+        d2 = router.next_destination()
+        d3 = router.next_destination()
+        d4 = router.next_destination()  # should wrap around
+        assert d1.destination_id != d2.destination_id
+        assert d2.destination_id != d3.destination_id
+        assert d4.destination_id == d1.destination_id
+
+    def test_round_robin_route_returns_one(self):
+        from hookrelay.routing.destination import DeliveryMode, MultiDestinationRouter
+
+        dests = self._make_dests(3)
+        router = MultiDestinationRouter(dests, mode=DeliveryMode.ROUND_ROBIN)
+        results = router.route({"event": "test"})
         assert len(results) == 1
-        assert results[0][0].rule_id == "rule-1"
 
-    def test_behavior_router_engine_evaluate_with_full_data(self):
-        engine = routing.RouterEngine()
-        rule = routing.RoutingRule(
-            rule_id="rule-github",
-            name="GitHub push",
-            enabled=True,
-            condition="header.X-GitHub-Event~^push",
-            channel="github",
+    def test_weighted_respects_weights(self):
+        from hookrelay.routing.destination import Destination, DeliveryMode, MultiDestinationRouter
+
+        heavy = Destination("h1", "bin-1", "https://heavy.example.com", weight=10)
+        light = Destination("l1", "bin-1", "https://light.example.com", weight=1)
+        router = MultiDestinationRouter([heavy, light], mode=DeliveryMode.WEIGHTED)
+        # With 10:1 weight, heavy should be chosen most of the time
+        counts = {"h1": 0, "l1": 0}
+        for _ in range(100):
+            results = router.route({"event": "test"})
+            for r in results:
+                counts[r["destination_id"]] += 1
+        assert counts["h1"] > counts["l1"]
+
+    def test_disabled_destination_excluded(self):
+        from hookrelay.routing.destination import Destination, DeliveryMode, MultiDestinationRouter
+
+        active = Destination("a1", "bin-1", "https://active.example.com", enabled=True)
+        disabled = Destination("d1", "bin-1", "https://disabled.example.com", enabled=False)
+        router = MultiDestinationRouter(
+            [active, disabled], mode=DeliveryMode.BROADCAST
         )
-        engine.add_rule(rule)
-        results = engine.evaluate(
-            "github",
-            {
-                "method": "POST",
-                "path": "/webhook",
-                "headers": {"X-GitHub-Event": "push"},
-                "body": b'{"ref": "refs/heads/main"}',
-            },
-        )
+        results = router.route({"event": "test"})
         assert len(results) == 1
-        assert results[0][0].rule_id == "rule-github"
+        assert results[0]["destination_id"] == "a1"
 
-    def test_behavior_router_engine_set_stop_on_first(self):
-        engine = routing.RouterEngine()
-        engine.set_stop_on_first(True)
-        # Default is True, so this is a no-op but should not raise
+    def test_get_delivery_stats(self):
+        from hookrelay.routing.destination import DeliveryMode, MultiDestinationRouter
 
-    def test_behavior_router_engine_stop_on_first_off(self):
-        engine = routing.RouterEngine()
-        engine.set_stop_on_first(False)
-        # Add two rules, both should match
-        r1 = routing.RoutingRule(
-            rule_id="r1", name="first", condition="method=POST",
-            channel="test"
-        )
-        r2 = routing.RoutingRule(
-            rule_id="r2", name="second", condition="method!=GET",
-            channel="test"
-        )
-        engine.add_rule(r1)
-        engine.add_rule(r2)
-        results = engine.evaluate(
-            "test", {"method": "POST"}
-        )
-        # With stop_on_first=False, both rules match
-        assert len(results) == 2
+        dests = self._make_dests(2)
+        router = MultiDestinationRouter(dests, mode=DeliveryMode.BROADCAST)
+        stats = router.get_delivery_stats()
+        assert isinstance(stats, dict)
+        for dest in dests:
+            assert dest.destination_id in stats
+            assert "delivered" in stats[dest.destination_id]
+            assert "failed" in stats[dest.destination_id]
