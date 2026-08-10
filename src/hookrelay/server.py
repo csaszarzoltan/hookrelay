@@ -286,6 +286,7 @@ def _register_delivery_api_routes(app: FastAPI) -> None:
     from fastapi import HTTPException
 
     from hookrelay.config.retry_policy import RetryPolicy
+    from hookrelay.dashboard.service import DashboardService
     from hookrelay.delivery import DeadLetterQueue, DeliveryStatus, RetryQueue
     from hookrelay.delivery.tracker import DeliveryTracker
 
@@ -391,6 +392,27 @@ def _register_delivery_api_routes(app: FastAPI) -> None:
             "success", details={"dlq_entry": entry_id},
         )
         return {"delivery_id": delivery_id, "status": "pending"}
+
+    @app.get("/api/dashboard/metrics")
+    async def api_dashboard_metrics(
+        window_minutes: int = 60,
+        bucket_minutes: int = 5,
+    ):
+        if window_minutes < 1 or window_minutes > 1440:
+            raise HTTPException(status_code=422, detail="window_minutes must be in [1, 1440]")
+        if bucket_minutes < 1 or bucket_minutes > window_minutes:
+            raise HTTPException(status_code=422, detail="bucket_minutes must be in [1, window_minutes]")
+        store = _get_or_create_storage()
+        service = DashboardService(store)
+        return {
+            "summary": service.summary(window_minutes=window_minutes),
+            "time_series": service.time_series(
+                window_minutes=window_minutes, bucket_minutes=bucket_minutes
+            ),
+            "endpoint_breakdown": service.endpoint_breakdown(
+                window_minutes=window_minutes
+            ),
+        }
 
 
 def _register_transform_api_routes(app: FastAPI) -> None:
