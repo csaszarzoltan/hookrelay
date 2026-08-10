@@ -5,6 +5,78 @@ All notable changes to **hookrelay** are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.8.0] — 2026-08-10
+
+### Features
+
+- **Payload Transformation Engine** — named transformation rules (a `name`
+  plus an ordered list of JQ-style filter expressions) applied to webhook
+  payloads before delivery: field set/add (`.env = "prod"`), delete
+  (`del(.token)`), rename (`.user_id = .id`), type conversion
+  (`.amount :: integer`), and the built-ins `uppercase`, `lowercase`,
+  `timestamp`, `uuid`, `hash` (SHA-256 hex), `mask_secrets`; statements
+  split on `|`; dotted paths create intermediate objects. Persisted in a new
+  `transformations` table (migration), CRUD via `TransformationStore`
+- **Transformations API + CLI** — `POST/GET/GET/PUT/DELETE
+  /api/v1/transformations[/{id}]` (201/200/404/204, 422 on empty name > 120
+  chars or non-string filters) and `hookrelay transform test <filter>
+  <payload.json>` for a no-server preview
+- **Multi-Destination Routing** — `Destination` and
+  `MultiDestinationRouter` fan one inbound webhook out per capture bin in
+  `broadcast` (all enabled), `round_robin` (exactly one, cycling), or
+  `weighted` (exactly one, drawn proportional to `weight`) mode; disabled
+  destinations are excluded from every mode; thread-safe per-destination
+  delivered/failed counters feed the Insights API
+- **Destinations API + CLI** — `POST/GET/GET/PUT/DELETE
+  /api/v1/destinations[/{id}]` (optional `?bin_id=` filter, 422 on empty
+  `bin_id`/`url`, `weight < 1`, or unknown delivery mode) and
+  `hookrelay destination add|list|delete`; each destination carries
+  `transform_id`, `signing_config`, `headers`, `retry_policy` (v1.5.0
+  durable retry-queue policy shape), `enabled`, `weight`, `delivery_mode`
+- **Outgoing HMAC Signing** — `hookrelay.security.outgoing.OutgoingSigner`
+  signs outgoing payloads in the `svix` (Ed25519, base64 signature +
+  `svix-id`), `hookdeck`, `github`, and `custom` (HMAC-SHA256, bare hex
+  digest over `"<timestamp>.<payload>"`) wire formats; every format injects
+  `x-hookrelay-timestamp` and `x-hookrelay-signature`; the Ed25519 key is
+  derived deterministically from the secret; Python verification via
+  `OutgoingSigner.verify` / `verify_signature` (timestamp required,
+  constant-time, never raises)
+- **Dashboard** — Next.js Transformations tab (rule CRUD, filter editor,
+  builtin chips, live client-side preview mirroring the Python engine) and
+  Destinations tab (per-bin manager with signing form, headers, retry
+  policy, delivery mode, and per-destination delivery logs via the insights
+  API)
+
+### Fixes
+
+- None (v1.8.0 is additive and backward-compatible)
+
+### Tests
+
+- 119 task-relevant tests pass for the transformation/routing/signing scope
+  (pre-dev RED suite in `test_transformations.py`, `test_routing.py`,
+  `test_hmac.py` plus dashboard API tests); the 61 full-suite failures are
+  pre-existing v1.7.0 backend alerting/insights issues untouched by this
+  change (documented baseline policy applies)
+
+### Docs
+
+- README — v1.8.0 feature section, `hookrelay transform` /
+  `hookrelay destination` CLI usage, CLI command table, project structure,
+  and dashboard tabs
+- [`docs/transformations.md`](docs/transformations.md) — filter syntax
+  (set/delete/rename/convert/built-ins), type conversions, preview
+  (dashboard/CLI/Python), REST + CLI + Python API reference, dashboard tab
+- [`docs/destinations.md`](docs/destinations.md) — delivery modes
+  (broadcast/round-robin/weighted), per-destination configuration fields,
+  retry policies, REST + CLI + Python API reference, dashboard tab
+- [`docs/signing.md`](docs/signing.md) — algorithms (svix/hookdeck/github/
+  custom), key management, Python verification + receiver-side examples
+  (GitHub HMAC and Svix Ed25519), API coverage
+- [`examples/transforms_routing.py`](examples/transforms_routing.py) —
+  runnable end-to-end walkthrough (create transformation → attach
+  destinations → route + sign + verify) with no server required
+
 ## [1.7.0] — 2026-08-08
 
 ### Features

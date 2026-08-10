@@ -247,6 +247,18 @@ Full reference (REST API, validation behaviour): [`insights-api.md`](insights-ap
 | `GET` | `/dashboard/bins` | Bins view — capture bins + live feed (v1.6.0+) |
 | `GET` | `/dashboard/alerts` | Alerts tab — rules list + create form + toggles (v1.7.0+) |
 | `GET` | `/dashboard/insights` | Insights view — endpoint stats + time-series chart (v1.7.0+) |
+| `GET` | `/dashboard/` | Transformations tab — builder + live preview + builtin chips (v1.8.0+, served by the Next.js frontend) |
+| `GET` | `/dashboard/` | Destinations tab — per-bin signing/headers/retry/delivery mode (v1.8.0+, served by the Next.js frontend) |
+| `POST` | `/api/v1/transformations` | Create a transformation rule (v1.8.0+) |
+| `GET` | `/api/v1/transformations` | List transformation rules (v1.8.0+) |
+| `GET` | `/api/v1/transformations/{transform_id}` | Fetch one transformation rule (v1.8.0+) |
+| `PUT` | `/api/v1/transformations/{transform_id}` | Update a transformation rule (v1.8.0+) |
+| `DELETE` | `/api/v1/transformations/{transform_id}` | Delete a transformation rule (v1.8.0+) |
+| `POST` | `/api/v1/destinations` | Create a destination (v1.8.0+) |
+| `GET` | `/api/v1/destinations` | List destinations; `?bin_id=` filters by bin (v1.8.0+) |
+| `GET` | `/api/v1/destinations/{destination_id}` | Fetch one destination (v1.8.0+) |
+| `PUT` | `/api/v1/destinations/{destination_id}` | Update a destination (v1.8.0+) |
+| `DELETE` | `/api/v1/destinations/{destination_id}` | Delete a destination (v1.8.0+) |
 | `GET` | `/api/alerts/rules` | List alert rules (v1.7.0+) |
 | `POST` | `/api/alerts/rules` | Create an alert rule (v1.7.0+) |
 | `PATCH` | `/api/alerts/rules/{rule_id}` | Update a rule (e.g. `{"enabled": false}`) (v1.7.0+) |

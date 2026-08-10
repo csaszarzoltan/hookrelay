@@ -166,6 +166,9 @@ The server mounts:
 - **Alerts dashboard** at `http://localhost:8000/dashboard/alerts` (v1.7.0)
 - **Insights API** at `/api/insights/endpoints`, `/api/insights/timeseries` (v1.7.0)
 - **Insights dashboard** at `http://localhost:8000/dashboard/insights` (v1.7.0)
+- **Transformations API** at `/api/v1/transformations` (v1.8.0)
+- **Destinations API** at `/api/v1/destinations` (v1.8.0)
+- **Transformations + Destinations dashboard tabs** at `http://localhost:8000/dashboard/` (v1.8.0, Next.js frontend)
 - **Relay WebSocket** at `ws://localhost:8000/ws/{channel}`
 - **History API** at `GET http://localhost:8000/api/history`
 - **Replay API** at `POST http://localhost:8000/api/replay/{request_id}`
@@ -271,6 +274,54 @@ hookrelay insights timeseries --metric success_rate --window 24h --bucket hourly
 
 Invalid values exit 1, e.g. `Error: window must be one of 15m, 1h, 24h, 7d`.
 
+## `hookrelay transform`
+
+Test and preview payload transformations (v1.8.0). Applies a JQ-style filter
+expression to a JSON payload file and prints the transformed result. See
+[`docs/transformations.md`](transformations.md).
+
+```
+hookrelay transform test <filter> <payload.json>
+```
+
+**Example:**
+```bash
+hookrelay transform test ".data.currency |= uppercase" payload.json
+```
+
+## `hookrelay destination`
+
+Manage multi-destination forwarding targets per capture bin (v1.8.0). See
+[`docs/destinations.md`](destinations.md).
+
+```
+hookrelay destination add <bin_id> <url> [options]
+hookrelay destination list <bin_id>
+hookrelay destination delete <destination_id>
+```
+
+**Options for `add`:**
+
+| Option | Description |
+|---|---|
+| `--transform ID` | Transformation rule ID applied before forwarding |
+| `--signing-algorithm ALGO` | Signing algorithm (`svix`/`hookdeck`/`github`/`custom`) |
+| `--signing-secret SECRET` | Signing secret (paired with `--signing-algorithm`) |
+| `--header K=V` | Extra header to attach (repeatable) |
+| `--weight N` | Weight for `weighted` delivery mode (default 1) |
+| `--delivery-mode MODE` | `broadcast` (default), `round_robin`, or `weighted` |
+| `--enabled/--disabled` | Enable/disable the destination (default enabled) |
+
+**Example:**
+```bash
+hookrelay destination add bin-checkout https://api.acme.com/hook \
+  --transform cc3ce48215b54c35a24c28b1d0f70e2d \
+  --signing-algorithm github --signing-secret whsec_checkout \
+  --header "X-Source=hookrelay"
+
+hookrelay destination list bin-checkout
+hookrelay destination delete 6c6b8a85...
+```
 
 ## Authentication environment variable
 

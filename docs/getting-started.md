@@ -202,5 +202,13 @@ Slack/email/webhook notifiers, cooldown, and paused rules — plus the
 [delivery insights API](insights-api.md) (`/api/insights/endpoints` and
 `/api/insights/timeseries`) with 422 validation on window/bucket.
 
+Hookrelay 1.8 adds [payload transformations](transformations.md) (JQ-style
+filter rules with built-ins), [multi-destination routing](destinations.md)
+(broadcast / round-robin / weighted per capture bin), and
+[outgoing signing](signing.md) (svix Ed25519 / hookdeck / github / custom
+HMAC) — all manageable via REST, CLI, or the dashboard's Transformations
+and Destinations tabs.
+
 Every guide pairs with a runnable example under [`../examples/`](../examples/),
-for example `python examples/hmac_verification.py`.
+for example `python examples/hmac_verification.py` or
+`python examples/transforms_routing.py`.

@@ -12,6 +12,26 @@
 
 ## Features
 
+### What is new in 1.8.0
+
+- **Payload transformations** — named, JQ-style filter rules
+  (`uppercase`/`lowercase`/`timestamp`/`uuid`/`hash`/`mask_secrets`
+  built-ins, field set/delete/rename, type conversion) applied to webhook
+  payloads before delivery; CRUD via `/api/v1/transformations`,
+  `hookrelay transform test`, and the dashboard builder with a live
+  client-side preview
+- **Multi-destination routing** — fan one inbound webhook out to multiple
+  destinations per capture bin with `broadcast` / `round_robin` / `weighted`
+  delivery modes; per-destination transforms, signing, headers, retry
+  policy, and enable/weight
+- **Outgoing HMAC signing** — sign payloads leaving the relay in the
+  `svix` (Ed25519), `hookdeck`, `github`, or `custom` (HMAC-SHA256) wire
+  formats, always stamped with `x-hookrelay-timestamp`; Python verification
+  via `verify_signature`
+- **Dashboard** — Transformations tab (builder + live preview + builtin
+  chips + full CRUD) and Destinations tab (signing/headers/retry/delivery
+  mode per destination, delivery logs per destination)
+
 ### What is new in 1.7.0
 
 - **Failure alerting** — declarative alert rules (`success_rate_below`,
@@ -121,6 +141,8 @@
 - **Capture bins (v1.6.0+)** — create persistent test endpoints and forward captured requests: `hookrelay bin create|list|inspect|forward`
 - **Alerting (v1.7.0+)** — failure alert rules with rolling-window evaluation: `hookrelay alerts list|create|delete`
 - **Delivery insights (v1.7.0+)** — per-endpoint stats and time series: `hookrelay insights endpoints|timeseries`
+- **Transformations (v1.8.0+)** — preview JQ-style payload filters: `hookrelay transform test`
+- **Destinations (v1.8.0+)** — manage multi-destination forwarding targets: `hookrelay destination add|list|delete`
 - **History browser** — search and browse webhooks with FTS5 full-text search
 - **Conditional forwarding** — filter by source IP, HTTP method, path, headers, or status code
 - **SSRF protection** — IP range blocking (IPv4/IPv6), DNS anti-rebinding, protocol whitelist
@@ -137,6 +159,8 @@
 - **Bins view (v1.6.0+)** — create capture bins, copy their public URLs, watch a live request feed, and forward captured requests with one click (see [capture bins guide](docs/capture-bins-1.6.md))
 - **Alerts tab (v1.7.0+)** — `/dashboard/alerts`: alert rule list, create form, enable/disable toggle, and delete
 - **Insights view (v1.7.0+)** — `/dashboard/insights`: per-endpoint delivery stats table and a canvas time-series chart
+- **Transformations tab (v1.8.0+)** — transformation builder with live JQ-style preview and builtin chips, full CRUD
+- **Destinations tab (v1.8.0+)** — per-bin destination manager with signing config, headers, retry, and delivery mode
 
 ## Installation
 
@@ -361,6 +385,50 @@ failure-reason classification, and validation behaviour. The dashboard
 enable/disable toggles, and delete; the **Insights** view
 (`/dashboard/insights`) renders the stats table and a time-series chart.
 
+## Payload transformations & multi-destination routing (v1.8.0)
+
+v1.8.0 rewrites webhook payloads before delivery and fans one inbound
+webhook out to multiple destinations. Create a transformation rule
+(JQ-style filters), attach it to destinations per capture bin, and let each
+destination sign, add headers, retry, and route its own way.
+
+Create a transformation and preview it against a sample payload:
+
+```bash
+curl -s -X POST http://localhost:8000/api/v1/transformations \
+  -H "Content-Type: application/json" \
+  -d '{"name": "scrub-and-normalize", "filters": [
+    ".data.currency |= uppercase", ".data.amount :: integer", "del(.token)"]}'
+
+hookrelay transform test ".data.currency |= uppercase" payload.json
+```
+
+Attach signed destinations to a bin with different delivery modes:
+
+```bash
+hookrelay destination add bin-checkout https://api.acme.com/hook \
+  --transform <transform_id> \
+  --signing-algorithm github --signing-secret whsec_checkout \
+  --header "X-Source=hookrelay"
+
+hookrelay destination add bin-checkout https://canary.acme.com/hook \
+  --delivery-mode weighted --weight 1
+
+hookrelay destination list bin-checkout
+```
+
+Delivery modes: `broadcast` (every enabled destination), `round_robin`
+(exactly one, cycling), `weighted` (exactly one, drawn proportional to
+`weight`). Outgoing signatures follow the `svix` (Ed25519), `hookdeck`,
+`github`, or `custom` (HMAC-SHA256) wire formats, always stamped with
+`x-hookrelay-timestamp`; receivers verify via Python
+(`verify_signature`). Feature guides: [transformations](docs/transformations.md),
+[destinations](docs/destinations.md), [signing](docs/signing.md), and the
+runnable [`examples/transforms_routing.py`](examples/transforms_routing.py).
+The dashboard **Transformations** tab offers a builder with live preview
+and builtin chips; the **Destinations** tab manages per-bin signing,
+headers, retry, and delivery mode.
+
 ## CLI Commands
 
 | Command | Description |
@@ -381,6 +449,10 @@ enable/disable toggles, and delete; the **Insights** view
 | `hookrelay alerts delete <rule_id>` | Delete an alert rule (v1.7.0) |
 | `hookrelay insights endpoints [--window 24h]` | Per-endpoint delivery stats as JSON (v1.7.0) |
 | `hookrelay insights timeseries [--metric deliveries] [--window 24h] [--bucket hourly]` | Bucketed delivery time series as JSON (v1.7.0) |
+| `hookrelay transform test <filter> <payload.json>` | Apply a JQ-style filter to a payload file and print the result (v1.8.0) |
+| `hookrelay destination add <bin_id> <url> [--transform ID] [--signing-algorithm ALGO] [--signing-secret SECRET] [--header K=V]... [--weight N] [--delivery-mode MODE]` | Add a destination to a bin (v1.8.0) |
+| `hookrelay destination list <bin_id>` | List all destinations for a bin (v1.8.0) |
+| `hookrelay destination delete <destination_id>` | Delete a destination (v1.8.0) |
 
 ### Options
 
@@ -410,9 +482,11 @@ hookrelay/
 │       ├── alerts/               # Failure alerting (rules, storage, evaluator, notifiers, API)
 │       ├── insights/             # Delivery insights (service, API)
 │       ├── bins/                 # Webhook capture bins (service, forward, API, CLI, dashboard)
+│       ├── transforms/           # Payload transformation engine + store (v1.8.0)
+│       ├── routing/              # Multi-destination routing + destination store (v1.8.0)
 │       ├── config/               # Per-endpoint config (RetryPolicy, headers)
 │       ├── delivery/             # Retry queue, DLQ, idempotency, tracking
-│       ├── security/             # HMAC signature verification
+│       ├── security/             # HMAC signature verification + outgoing signing
 │       └── dashboard/            # Web Dashboard module
 │           ├── __init__.py       # Dashboard router (all UI routes)
 │           ├── connection_manager.py  # WebSocket connection manager
@@ -452,6 +526,9 @@ hookrelay/
 │   ├── capture-bins-1.6.md       # Webhook capture bins guide
 │   ├── alerting.md               # Alert rules, evaluator, notifiers guide (v1.7.0)
 │   ├── insights-api.md           # Delivery insights API reference (v1.7.0)
+│   ├── transformations.md        # Payload transformation engine guide (v1.8.0)
+│   ├── destinations.md           # Multi-destination routing guide (v1.8.0)
+│   ├── signing.md                # Outgoing signing guide (v1.8.0)
 │   └── screenshots/              # Dashboard screenshots
 ├── examples/
 │   ├── basic_relay.py            # Local receiver + relay flow
@@ -462,7 +539,8 @@ hookrelay/
 │   ├── hmac_verification.py      # Sign/verify webhook payloads
 │   ├── endpoint_config.py        # EndpointConfig + HeaderManager
 │   ├── dashboard_metrics.py      # Metrics, latency, success-rate analyzers
-│   └── capture_bins.py           # Webhook capture bins walkthrough
+│   ├── capture_bins.py           # Webhook capture bins walkthrough
+│   └── transforms_routing.py     # Transformations + routing + signing walkthrough (v1.8.0)
 ├── CHANGELOG.md
 └── pyproject.toml
 ```
