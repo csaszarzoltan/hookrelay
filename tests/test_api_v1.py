@@ -139,7 +139,7 @@ class TestDestinationsCRUD:
     def test_get_destination_by_id(self, client):
         create_resp = client.post(
             "/api/v1/destinations",
-            json={"bin_id": "bin-1", "url": "https://dest.example.com"},
+            json={"bin_id": "bin-1", "url": "https://example.com/hook/dest"},
         )
         did = create_resp.json()["destination_id"]
         resp = client.get(f"/api/v1/destinations/{did}")
@@ -149,20 +149,20 @@ class TestDestinationsCRUD:
     def test_update_destination(self, client):
         create_resp = client.post(
             "/api/v1/destinations",
-            json={"bin_id": "bin-1", "url": "https://old.example.com"},
+            json={"bin_id": "bin-1", "url": "https://example.com/hook/old"},
         )
         did = create_resp.json()["destination_id"]
         resp = client.put(
             f"/api/v1/destinations/{did}",
-            json={"bin_id": "bin-1", "url": "https://new.example.com"},
+            json={"bin_id": "bin-1", "url": "https://example.com/hook/new"},
         )
         assert resp.status_code == 200
-        assert resp.json()["url"] == "https://new.example.com"
+        assert resp.json()["url"] == "https://example.com/hook/new"
 
     def test_delete_destination(self, client):
         create_resp = client.post(
             "/api/v1/destinations",
-            json={"bin_id": "bin-1", "url": "https://del.example.com"},
+            json={"bin_id": "bin-1", "url": "https://example.com/hook/del"},
         )
         did = create_resp.json()["destination_id"]
         resp = client.delete(f"/api/v1/destinations/{did}")
@@ -171,7 +171,7 @@ class TestDestinationsCRUD:
     def test_create_400_missing_url(self, client):
         create_resp = client.post(
             "/api/v1/destinations",
-            json={"bin_id": "bin-ok", "url": "https://valid.example.com"},
+            json={"bin_id": "bin-ok", "url": "https://example.com/hook/ok"},
         )
         assert create_resp.status_code == 201
         resp = client.post("/api/v1/destinations", json={"bin_id": "bin-1"})
@@ -180,7 +180,7 @@ class TestDestinationsCRUD:
     def test_create_400_missing_bin_id(self, client):
         create_resp = client.post(
             "/api/v1/destinations",
-            json={"bin_id": "bin-ok", "url": "https://valid.example.com"},
+            json={"bin_id": "bin-ok", "url": "https://example.com/hook/ok2"},
         )
         assert create_resp.status_code == 201
         resp = client.post(
@@ -191,7 +191,7 @@ class TestDestinationsCRUD:
     def test_get_404_nonexistent(self, client):
         create_resp = client.post(
             "/api/v1/destinations",
-            json={"bin_id": "bin-404", "url": "https://valid.example.com"},
+            json={"bin_id": "bin-404", "url": "https://example.com/hook/404"},
         )
         assert create_resp.status_code == 201
         resp = client.get("/api/v1/destinations/__nonexistent__")
@@ -200,11 +200,11 @@ class TestDestinationsCRUD:
     def test_list_by_bin_id(self, client):
         client.post(
             "/api/v1/destinations",
-            json={"bin_id": "bin-filter", "url": "https://a.example.com"},
+            json={"bin_id": "bin-filter", "url": "https://example.com/hook/a"},
         )
         client.post(
             "/api/v1/destinations",
-            json={"bin_id": "bin-other", "url": "https://b.example.com"},
+            json={"bin_id": "bin-other", "url": "https://example.com/hook/b"},
         )
         resp = client.get("/api/v1/destinations?bin_id=bin-filter")
         assert resp.status_code == 200

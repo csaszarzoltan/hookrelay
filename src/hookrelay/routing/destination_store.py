@@ -7,7 +7,61 @@ from datetime import UTC, datetime
 from typing import Any
 from uuid import uuid4
 
+from hookrelay.security.outgoing import SUPPORTED_ALGORITHMS
+from hookrelay.ssrf import validate_target_url
 from hookrelay.storage import Storage
+
+
+def validate_destination_url(url: str) -> str:
+    """Validate and normalize a destination URL through the SSRF guard.
+
+    Enforces the repo-wide SSRF policy (scheme allowlist http/https,
+    private/loopback/link-local rejection, system-port block) so a
+    destination can never point at an internal address.
+
+    Raises:
+        ValueError: When the URL is empty or fails the SSRF guard.
+    """
+    if not url or not url.strip():
+        raise ValueError("url must not be empty")
+    url = url.strip()
+    is_valid, reason = validate_target_url(url)
+    if not is_valid:
+        raise ValueError(f"url fails SSRF guard: {reason}")
+    return url
+
+
+def validate_signing_config(signing_config: dict[str, Any] | None) -> dict[str, Any] | None:
+    """Validate a destination's outgoing signing configuration.
+
+    Enforces the same contract as :class:`hookrelay.security.outgoing.OutgoingSigner`:
+    the algorithm must be one of ``svix`` / ``hookdeck`` / ``github`` /
+    ``custom`` and the secret must be a non-empty string.
+
+    Raises:
+        ValueError: When the algorithm is unknown or the secret is invalid.
+    """
+    if signing_config is None:
+        return None
+    if not isinstance(signing_config, dict):
+        raise TypeError("signing_config must be an object")
+    algorithm = signing_config.get("algorithm")
+    if not algorithm:
+        # An empty signing config object means "no signing" — same as None.
+        if not signing_config:
+            return None
+        raise ValueError("signing_config.algorithm is required")
+    if algorithm not in SUPPORTED_ALGORITHMS:
+        raise ValueError(
+            f"unsupported signing algorithm '{algorithm}'; "
+            f"supported: {', '.join(sorted(SUPPORTED_ALGORITHMS))}"
+        )
+    secret = signing_config.get("secret")
+    if not isinstance(secret, str) or not secret.strip():
+        raise ValueError("signing_config.secret must be a non-empty string")
+    if len(secret) < 8:
+        raise ValueError("signing_config.secret must be at least 8 characters")
+    return dict(signing_config)
 
 
 class DestinationStore:
@@ -56,26 +110,26 @@ class DestinationStore:
         """
         if not bin_id or not bin_id.strip():
             raise ValueError("bin_id must not be empty")
-        if not url or not url.strip():
-            raise ValueError("url must not be empty")
+        url = validate_destination_url(url)
         if weight < 1:
             raise ValueError("weight must be >= 1")
         if delivery_mode not in ("broadcast", "round_robin", "weighted"):
             raise ValueError("delivery_mode must be broadcast|round_robin|weighted")
+        signing_config = validate_signing_config(signing_config)
 
         self._init_table()
         destination_id = uuid4().hex
         now = datetime.now(UTC).isoformat()
         self._conn.execute(
             """INSERT INTO destinations
-               (destination_id, bin_id, url, transform_id, signing_config, headers,
-                retry_policy, enabled, weight, delivery_mode,
-                delivered_count, failed_count, created_at, updated_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, ?, ?)""",
+              (destination_id, bin_id, url, transform_id, signing_config, headers,
+               retry_policy, enabled, weight, delivery_mode,
+               delivered_count, failed_count, created_at, updated_at)
+              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, ?, ?)""",
             (
                 destination_id,
                 bin_id.strip(),
-                url.strip(),
+                url,
                 transform_id,
                 json.dumps(signing_config or {}),
                 json.dumps(headers or {}),
@@ -152,9 +206,7 @@ class DestinationStore:
             return None
 
         if url is not None:
-            if not url or not url.strip():
-                raise ValueError("url must not be empty")
-            url = url.strip()
+            url = validate_destination_url(url)
         if weight is not None and weight < 1:
             raise ValueError("weight must be >= 1")
         if delivery_mode is not None and delivery_mode not in (
@@ -163,6 +215,8 @@ class DestinationStore:
             "weighted",
         ):
             raise ValueError("delivery_mode must be broadcast|round_robin|weighted")
+        if signing_config is not None:
+            signing_config = validate_signing_config(signing_config)
 
         now = datetime.now(UTC).isoformat()
 

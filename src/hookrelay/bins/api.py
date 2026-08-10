@@ -19,6 +19,7 @@ returns the captured ``request_id``.
 
 from __future__ import annotations
 
+import asyncio
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request
@@ -57,6 +58,22 @@ class _ForwardTarget(BaseModel):
 def _get_bin_service() -> BinService:
     """Return a BinService bound to the process-wide storage."""
     return BinService(_get_or_create_storage())
+
+
+def _dispatch_capture(request_id: str, bin_id: str, storage: Storage) -> None:
+    """Deliver one captured request to the bin's destinations (fail-open).
+
+    Any error in the routing/transform/sign/send chain is swallowed here:
+    the capture has already been persisted and the delivery failure is
+    visible via the destination's ``failed_count`` and the
+    ``delivery_attempts`` feed.
+    """
+    try:
+        from hookrelay.delivery.dispatcher import deliver_captured_request
+
+        deliver_captured_request(bin_id, request_id, storage)
+    except Exception:
+        pass
 
 
 def _get_or_create_storage() -> Storage:
@@ -116,6 +133,13 @@ def create_bins_router() -> APIRouter:
             body=body,
             query_params=query_params,
             source_ip=source_ip,
+        )
+        # Route -> transform -> sign -> send the capture to the bin's
+        # destinations. Runs in the threadpool (blocking HTTP fan-out) and
+        # never fails the capture itself: delivery errors are recorded per
+        # destination (failed_count + delivery_attempts row) instead.
+        await asyncio.to_thread(
+            _dispatch_capture, captured.request_id, bin_id, _get_or_create_storage()
         )
         try:
             await broadcast_bin_capture(get_live_manager(), captured)

@@ -118,14 +118,14 @@ class TestDestinationAddCLI:
         assert result["headers"]["X-Custom"] == "value"
 
     def test_list_destinations_for_bin(self):
-        cli.destination_add("bin-list", "https://a.example.com")
-        cli.destination_add("bin-list", "https://b.example.com")
+        cli.destination_add("bin-list", "https://example.com/hook/a")
+        cli.destination_add("bin-list", "https://example.com/hook/b")
         result = cli.destination_list("bin-list")
         assert isinstance(result, list)
         assert len(result) >= 2
 
     def test_delete_destination(self):
-        result = cli.destination_add("bin-del", "https://del.example.com")
+        result = cli.destination_add("bin-del", "https://example.com/hook/del")
         did = result["destination_id"]
         deleted = cli.destination_delete(did)
         assert deleted is True

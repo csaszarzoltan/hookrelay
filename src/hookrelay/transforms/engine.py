@@ -246,7 +246,6 @@ class _ConvertOp(_Op):
         return work
 
 
-_PATH_RE = re.compile(r"^\s*(?:\.?[A-Za-z0-9_]+)(?:\.[A-Za-z0-9_]+)*\s*$")
 _STRING_RE = re.compile(r'^"(.*)"$', re.DOTALL)
 
 

@@ -107,12 +107,22 @@ All `/api/v1/destinations` endpoints require the Bearer token when
 
 Validation (all return `422 {"detail": "..."}`): non-empty `bin_id`/`url`,
 `weight >= 1`, and `delivery_mode` one of `broadcast`, `round_robin`,
-`weighted`.
+`weighted`. Destination `url`s are additionally guarded by the repo-wide
+SSRF policy (scheme allowlist `http`/`https`, private/loopback/link-local
+and system-port rejection — see `src/hookrelay/ssrf.py`), and any
+`signing_config` is validated at the boundary: `algorithm` must be one of
+`svix` / `hookdeck` / `github` / `custom` and `secret` a non-empty string
+of at least 8 characters.
 
 The record includes delivery counters updated by the pipeline:
 `delivered_count` and `failed_count` (incrementable via
 `DestinationStore.increment_delivered` / `increment_failed`), consumed by
-the Insights API.
+the Insights API. Since v1.8.0 the delivery pipeline is wired end-to-end:
+a webhook captured on a bin is routed (`broadcast` / `round_robin` /
+`weighted`), transformed (its `transform_id` rule), signed (its
+`signing_config`), and sent to each selected destination, with a
+`delivery_attempts` row and the destination counters updated on the
+outcome.
 
 ## CLI
 

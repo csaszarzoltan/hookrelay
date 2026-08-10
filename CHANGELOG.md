@@ -49,7 +49,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixes
 
-- None (v1.8.0 is additive and backward-compatible)
+- **Wire the delivery pipeline end-to-end** — routing → transform → sign →
+  send now runs in the actual delivery path: a webhook captured on a bin
+  is fanned out to its destinations (`broadcast` / `round_robin` /
+  `weighted`), its `transform_id` rule is applied to the JSON payload,
+  signing headers (`x-hookrelay-signature` / `x-hookrelay-timestamp`) are
+  injected from `signing_config`, the outgoing request is recorded as a
+  `delivery_attempts` row, and the destination's `delivered_count` /
+  `failed_count` increment on the outcome. New `delivery/dispatcher.py`
+  (`deliver_captured_request`) invoked from the bin capture endpoint,
+  fail-open so delivery never blocks ingestion.
+- **Single canonical `DestinationStore`** — the duplicate
+  `bins/destination_store.py` is removed; `hookrelay.bins` re-exports the
+  `routing` class so `from hookrelay.bins import DestinationStore` keeps
+  working. One store, one `round_robin` mode allowlist.
+- **Destination URL SSRF guard** — destination `url`s are validated through
+  the existing `ssrf.py` guard at create/update (scheme allowlist
+  `http`/`https`, private/loopback/link-local and system-port rejection),
+  matching the repo's forward path.
+- **`signing_config` validation** — the algorithm allowlist
+  (`svix`/`hookdeck`/`github`/`custom`) and non-empty, ≥8-char secret
+  enforcement are applied at the store/API boundary (422 on invalid input),
 
 ### Tests
 

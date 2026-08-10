@@ -14,14 +14,13 @@ payload inspection. The package is fully implemented:
 * :mod:`hookrelay.bins.dashboard` — live-feed broadcast + Bins dashboard
   view with click-to-forward
 * :mod:`hookrelay.bins.cli` — the ``hookrelay bin`` command group
-* :mod:`hookrelay.bins.destination_store` — ``DestinationStore`` persistence
-  for per-bin delivery destinations with transformation, signing, retry
-  policy, and delivery mode
+* :mod:`hookrelay.routing.destination_store` — ``DestinationStore`` persistence
+  for per-bin delivery destinations (re-exported below so
+  ``from hookrelay.bins import DestinationStore`` keeps working)
 """
 
 from __future__ import annotations
 
-from hookrelay.bins.destination_store import DestinationStore
 from hookrelay.bins.forward import (
     BinRequestNotFoundError,
     ForwardError,
@@ -29,6 +28,7 @@ from hookrelay.bins.forward import (
 )
 from hookrelay.bins.models import Bin, CapturedRequest, ForwardResult
 from hookrelay.bins.service import BinNotFoundError, BinService
+from hookrelay.routing.destination_store import DestinationStore
 
 __all__ = [
     "Bin",
