@@ -25,36 +25,14 @@
     --ring: 239 84% 67%;
     --radius: 0.5rem;
   }
-
-  .dark {
-    --background: 222.2 84% 4.9%;
-    --foreground: 210 40% 98%;
-    --card: 222.2 84% 4.9%;
-    --card-foreground: 210 40% 98%;
-    --popover: 222.2 84% 4.9%;
-    --popover-foreground: 210 40% 98%;
-    --primary: 239 84% 67%;
-    --primary-foreground: 222.2 47.4% 11.2%;
-    --secondary: 217.2 32.6% 17.5%;
-    --secondary-foreground: 210 40% 98%;
-    --muted: 217.2 32.6% 17.5%;
-    --muted-foreground: 215 20.2% 65.1%;
-    --accent: 217.2 32.6% 17.5%;
-    --accent-foreground: 210 40% 98%;
-    --destructive: 0 62.8% 30.6%;
-    --destructive-foreground: 210 40% 98%;
-    --border: 217.2 32.6% 17.5%;
-    --input: 217.2 32.6% 17.5%;
-    --ring: 239 84% 67%;
-  }
 }
 
 @layer base {
   * {
-    @apply border-border;
+    @apply border-neutral-200;
   }
   body {
-    @apply bg-background text-foreground;
+    @apply bg-neutral-50 text-neutral-900;
     font-feature-settings: "rlig" 1, "calt" 1;
   }
 }
@@ -78,22 +56,440 @@
 }
 
 @layer components {
+  /* ------------------------------------------------------------------ */
+  /* Typography helpers                                                  */
+  /* ------------------------------------------------------------------ */
+  .eyebrow {
+    @apply text-xs font-semibold uppercase tracking-wider text-primary-600;
+  }
+  .muted {
+    @apply text-sm text-neutral-500;
+  }
+  .mono {
+    font-family: var(--font-mono), ui-monospace, monospace;
+    font-size: 0.85em;
+  }
   .code-block {
     @apply bg-neutral-900 text-neutral-100 font-mono text-sm p-4 rounded-lg overflow-x-auto;
   }
-  .json-key {
-    @apply text-blue-300;
+  .code-input {
+    @apply w-full font-mono text-sm bg-neutral-900 text-neutral-100 p-3 rounded-lg border border-neutral-700 focus:outline-none focus:ring-2 focus:ring-primary-500 resize-y;
+    min-height: 8rem;
+    line-height: 1.5;
+    tab-size: 2;
   }
-  .json-string {
-    @apply text-green-300;
+  .json-key { @apply text-blue-300; }
+  .json-string { @apply text-green-300; }
+  .json-number { @apply text-yellow-300; }
+  .json-boolean { @apply text-purple-300; }
+  .json-null { @apply text-red-300; }
+
+  /* ------------------------------------------------------------------ */
+  /* Panels                                                              */
+  /* ------------------------------------------------------------------ */
+  .panel {
+    @apply bg-white border border-neutral-200 rounded-xl shadow-sm;
   }
-  .json-number {
-    @apply text-yellow-300;
+  .panel-header {
+    @apply flex flex-wrap items-center justify-between gap-4 p-6 border-b border-neutral-100;
   }
-  .json-boolean {
-    @apply text-purple-300;
+  .panel-hint {
+    @apply px-6 py-4 border-t border-neutral-100 bg-neutral-50 rounded-b-xl;
   }
-  .json-null {
-    @apply text-red-300;
+  .panel-hint p { @apply text-xs; }
+
+  /* ------------------------------------------------------------------ */
+  /* Buttons                                                             */
+  /* ------------------------------------------------------------------ */
+  .btn {
+    @apply inline-flex items-center justify-center gap-2 rounded-lg px-4 py-2 text-sm font-medium transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed focus:outline-none focus:ring-2 focus:ring-offset-1;
   }
+  .btn-primary {
+    @apply bg-primary-600 text-white hover:bg-primary-700 focus:ring-primary-500;
+  }
+  .btn-secondary {
+    @apply bg-white text-neutral-700 border border-neutral-300 hover:bg-neutral-50 focus:ring-neutral-400;
+  }
+  .btn-ghost {
+    @apply bg-transparent text-neutral-600 hover:bg-neutral-100 focus:ring-neutral-400;
+  }
+  .btn-danger {
+    @apply hover:bg-red-50 hover:text-red-600;
+  }
+  .btn-sm {
+    @apply px-2.5 py-1.5 text-xs rounded-md;
+  }
+
+  /* ------------------------------------------------------------------ */
+  /* Form controls                                                       */
+  /* ------------------------------------------------------------------ */
+  .input {
+    @apply w-full rounded-lg border border-neutral-300 bg-white px-3 py-2 text-sm text-neutral-900 placeholder:text-neutral-400 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-primary-500;
+  }
+  .input-sm {
+    @apply px-2.5 py-1.5 text-xs;
+  }
+  .form-group {
+    @apply mb-4;
+  }
+  .form-group label {
+    @apply block text-sm font-medium text-neutral-700 mb-1.5;
+  }
+  .form-group-header {
+    @apply flex items-center justify-between mb-1.5;
+  }
+  .form-group-header label {
+    @apply mb-0;
+  }
+  .form-hint {
+    @apply mt-1 text-xs text-neutral-500;
+  }
+  .form-row {
+    @apply grid grid-cols-1 sm:grid-cols-2 gap-4;
+  }
+  .checkbox-label {
+    @apply inline-flex items-center gap-2 text-sm text-neutral-700 cursor-pointer select-none;
+  }
+  .checkbox-label input[type="checkbox"] {
+    @apply h-4 w-4 rounded border-neutral-300 text-primary-600 focus:ring-primary-500;
+  }
+
+  /* ------------------------------------------------------------------ */
+  /* Status / alert banners                                              */
+  /* ------------------------------------------------------------------ */
+  .status-error {
+    @apply mx-6 mt-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700;
+  }
+  .status-success {
+    @apply mx-6 mt-4 rounded-lg border border-green-200 bg-green-50 px-4 py-3 text-sm text-green-700;
+  }
+
+  /* ------------------------------------------------------------------ */
+  /* Empty states                                                        */
+  /* ------------------------------------------------------------------ */
+  .empty-state {
+    @apply flex flex-col items-center justify-center text-center px-6 py-16;
+  }
+  .empty-icon {
+    @apply text-4xl mb-4;
+  }
+  .empty-state h2 {
+    @apply text-lg font-semibold text-neutral-900 mb-2;
+  }
+  .empty-state p {
+    @apply text-sm text-neutral-500 max-w-md mb-6;
+  }
+  .empty-state code,
+  .empty-inline code {
+    @apply font-mono text-xs bg-neutral-100 px-1 py-0.5 rounded;
+  }
+  .empty-inline {
+    @apply flex flex-col items-center justify-center gap-3 px-6 py-10 text-center;
+  }
+  .empty-inline p {
+    @apply text-sm text-neutral-500;
+  }
+
+  /* ------------------------------------------------------------------ */
+  /* Modals                                                              */
+  /* ------------------------------------------------------------------ */
+  .modal-overlay {
+    @apply fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/50 p-4 sm:p-8;
+  }
+  .modal {
+    @apply w-full max-w-2xl bg-white rounded-xl shadow-2xl mt-8 sm:mt-16 mb-8;
+  }
+  .modal-wide {
+    @apply max-w-4xl;
+  }
+  .modal-header {
+    @apply flex items-center justify-between px-6 py-4 border-b border-neutral-100;
+  }
+  .modal-header h2 {
+    @apply text-lg font-semibold text-neutral-900;
+  }
+  .modal-close {
+    @apply text-neutral-400 hover:text-neutral-600 text-2xl leading-none cursor-pointer bg-transparent border-0;
+  }
+  .modal-tabs {
+    @apply flex gap-1 px-6 pt-4 border-b border-neutral-100;
+  }
+  .modal-tabs button {
+    @apply px-4 py-2 text-sm font-medium text-neutral-500 rounded-t-lg border-b-2 border-transparent hover:text-neutral-800 cursor-pointer;
+  }
+  .modal-tabs button.active {
+    @apply text-primary-600 border-primary-600;
+  }
+  .modal-body {
+    @apply px-6 py-5;
+  }
+  .modal-footer {
+    @apply flex justify-end gap-3 px-6 py-4 border-t border-neutral-100 bg-neutral-50 rounded-b-xl;
+  }
+
+  /* ------------------------------------------------------------------ */
+  /* Transformations tab                                                 */
+  /* ------------------------------------------------------------------ */
+  .transformations-grid {
+    @apply grid grid-cols-1 md:grid-cols-2 gap-4 p-6;
+  }
+  .transformation-card {
+    @apply border border-neutral-200 rounded-xl p-5 hover:shadow-md transition-shadow bg-white;
+  }
+  .transformation-header {
+    @apply flex items-start justify-between gap-3 mb-3;
+  }
+  .transformation-name {
+    @apply text-base font-semibold text-neutral-900;
+  }
+  .transformation-meta {
+    @apply text-xs text-neutral-500 mt-1;
+  }
+  .transformation-actions {
+    @apply flex gap-2 shrink-0;
+  }
+  .transformation-filters {
+    @apply flex flex-wrap gap-2;
+  }
+  .filter-chip {
+    @apply inline-flex items-center rounded-md bg-neutral-100 px-2 py-1;
+  }
+  .filter-chip code {
+    @apply text-xs font-mono text-neutral-700;
+  }
+
+  /* Filter editor inside the builder modal */
+  .filters-editor {
+    @apply space-y-2;
+  }
+  .filter-row {
+    @apply flex gap-2 items-center;
+  }
+  .filter-input {
+    @apply font-mono text-xs;
+  }
+  .builtins-section {
+    @apply mt-4;
+  }
+  .builtin-chips {
+    @apply flex flex-wrap gap-2 mt-1.5;
+  }
+  .builtin-chip {
+    @apply inline-flex items-center rounded-full border border-neutral-300 bg-white px-3 py-1 text-xs font-medium text-neutral-600 hover:border-primary-400 hover:text-primary-600 hover:bg-primary-50 cursor-pointer transition-colors;
+  }
+  .filter-examples {
+    @apply mt-4;
+  }
+  .filter-examples summary {
+    @apply text-xs font-medium text-neutral-500 cursor-pointer hover:text-neutral-700;
+  }
+  .filter-examples .code-block {
+    @apply mt-2 p-3 text-xs;
+  }
+  .filter-examples .code-block div {
+    @apply mb-1 last:mb-0;
+  }
+
+  /* Builder / preview split */
+  .builder-tab .code-input {
+    @apply min-h-[6rem];
+  }
+  .preview-layout {
+    @apply grid grid-cols-1 lg:grid-cols-2 gap-4;
+  }
+  .preview-pane label {
+    @apply block text-sm font-medium text-neutral-700 mb-1.5;
+  }
+  .preview-pane .code-input {
+    @apply h-72 lg:h-80;
+  }
+  .preview-output {
+    @apply h-72 lg:h-80 overflow-auto rounded-lg border p-3 font-mono text-xs leading-relaxed;
+  }
+  .preview-output pre {
+    @apply whitespace-pre-wrap break-words;
+  }
+  .preview-output.success {
+    @apply bg-neutral-900 text-neutral-100 border-neutral-700;
+  }
+  .preview-output.error {
+    @apply bg-red-50 text-red-700 border-red-200;
+  }
+  .preview-output.empty {
+    @apply bg-neutral-50 text-neutral-400 border-neutral-200 flex items-center justify-center;
+  }
+
+  /* ------------------------------------------------------------------ */
+  /* Destinations tab                                                    */
+  /* ------------------------------------------------------------------ */
+  .bin-section {
+    @apply p-6 border-b border-neutral-100 last:border-b-0;
+  }
+  .bin-header {
+    @apply mb-4;
+  }
+  .bin-name {
+    @apply text-base font-semibold text-neutral-900;
+  }
+  .bin-meta {
+    @apply text-xs text-neutral-500 mt-0.5;
+  }
+  .destinations-grid {
+    @apply grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4;
+  }
+  .destination-card {
+    @apply border border-neutral-200 rounded-xl p-4 bg-white hover:shadow-md transition-shadow;
+  }
+  .destination-header {
+    @apply flex items-start justify-between gap-2 mb-3;
+  }
+  .destination-url {
+    @apply flex items-center gap-2 flex-wrap;
+  }
+  .url-badge {
+    @apply inline-flex items-center max-w-full truncate rounded-md bg-neutral-100 px-2 py-1 font-mono text-xs text-neutral-700;
+    overflow-wrap: anywhere;
+    white-space: normal;
+  }
+  .status-badge {
+    @apply inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium;
+  }
+  .status-badge.enabled {
+    @apply bg-green-100 text-green-700;
+  }
+  .status-badge.disabled {
+    @apply bg-neutral-200 text-neutral-600;
+  }
+  .destination-actions {
+    @apply flex gap-1.5 shrink-0;
+  }
+  .destination-details {
+    @apply space-y-1.5;
+  }
+  .detail-row {
+    @apply flex items-center justify-between gap-2 text-xs;
+  }
+  .detail-label {
+    @apply text-neutral-500;
+  }
+  .detail-value {
+    @apply text-neutral-800 font-medium;
+  }
+  .mode-badge {
+    @apply rounded bg-indigo-50 text-indigo-700 px-1.5 py-0.5 capitalize;
+  }
+
+  /* ------------------------------------------------------------------ */
+  /* Delivery logs tab                                                   */
+  /* ------------------------------------------------------------------ */
+  .controls-bar {
+    @apply flex flex-wrap items-center justify-between gap-3 px-6 py-4 border-b border-neutral-100;
+  }
+  .controls-group {
+    @apply flex flex-wrap items-center gap-2;
+  }
+  .loading-indicator {
+    @apply text-xs text-neutral-400 animate-pulse;
+  }
+  .summary-cards {
+    @apply grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 px-6 py-5;
+  }
+  .summary-card {
+    @apply rounded-xl border border-neutral-200 bg-white p-4 flex flex-col gap-1;
+  }
+  .summary-label {
+    @apply text-xs font-medium text-neutral-500;
+  }
+  .summary-value {
+    @apply text-2xl font-semibold text-neutral-900;
+  }
+  .chart-section {
+    @apply px-6 py-5 border-t border-neutral-100;
+  }
+  .chart-title {
+    @apply text-sm font-semibold text-neutral-800 mb-3;
+  }
+  .chart-container {
+    @apply h-48 w-full rounded-lg border border-neutral-200 bg-neutral-50 p-3 overflow-x-auto;
+  }
+  .chart-empty {
+    @apply h-full flex items-center justify-center;
+  }
+  .chart-bars {
+    @apply flex items-end gap-1 h-full min-w-full;
+  }
+  .chart-bar-wrapper {
+    @apply flex-1 flex flex-col items-center justify-end gap-1 h-full min-w-[2rem];
+  }
+  .chart-bar {
+    @apply w-full max-w-[2.5rem] rounded-t bg-primary-500 hover:bg-primary-600 transition-colors;
+    min-height: 2px;
+  }
+  .chart-bar.null {
+    @apply bg-neutral-300;
+  }
+  .chart-bar-label {
+    @apply text-[10px] text-neutral-400 whitespace-nowrap;
+  }
+  .chart-legend {
+    @apply mt-3 flex flex-wrap gap-4;
+  }
+  .legend-item {
+    @apply inline-flex items-center gap-1.5 text-xs text-neutral-500;
+  }
+  .legend-color {
+    @apply inline-block h-2.5 w-2.5 rounded-sm;
+  }
+  .table-section {
+    @apply px-6 py-5 border-t border-neutral-100;
+  }
+  .table-title {
+    @apply text-sm font-semibold text-neutral-800 mb-3;
+  }
+  .table-wrapper {
+    @apply overflow-x-auto rounded-lg border border-neutral-200;
+  }
+  .data-table {
+    @apply w-full text-sm text-left border-collapse;
+  }
+  .data-table thead th {
+    @apply bg-neutral-50 px-4 py-2.5 text-xs font-semibold text-neutral-500 uppercase tracking-wide border-b border-neutral-200;
+  }
+  .data-table tbody td {
+    @apply px-4 py-3 border-b border-neutral-100 align-middle;
+  }
+  .data-table tbody tr:last-child td {
+    @apply border-b-0;
+  }
+  .data-table tbody tr:hover {
+    @apply bg-neutral-50;
+  }
+  .table-loading {
+    @apply py-8 text-center text-sm text-neutral-400;
+  }
+  .destination-cell {
+    @apply flex flex-col gap-0.5;
+  }
+  .endpoint-id {
+    @apply text-[11px] text-neutral-400 font-mono;
+  }
+  .bin-badge {
+    @apply inline-flex rounded bg-neutral-100 px-1.5 py-0.5 font-mono text-[11px] text-neutral-600;
+  }
+  .failure-reason {
+    @apply text-xs text-neutral-600;
+  }
+}
+
+/* Accessibility helpers */
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
 }

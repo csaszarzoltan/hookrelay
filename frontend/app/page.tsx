@@ -1,18 +1,26 @@
 'use client'
 
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect } from 'react'
 import { DashboardLayout } from '@/components/DashboardLayout'
 import { TransformationsTab } from '@/components/TransformationsTab'
 import { DestinationsTab } from '@/components/DestinationsTab'
 import { DeliveryLogsTab } from '@/components/DeliveryLogsTab'
+import {
+  listTransformations,
+  listDestinations,
+  listBins,
+  Transformation,
+  Destination,
+  CaptureBin,
+} from '@/lib/api'
 
 type Tab = 'transformations' | 'destinations' | 'delivery-logs'
 
 export default function DashboardPage() {
   const [activeTab, setActiveTab] = useState<Tab>('transformations')
-  const [transformations, setTransformations] = useState<any[]>([])
-  const [destinations, setDestinations] = useState<any[]>([])
-  const [bins, setBins] = useState<any[]>([])
+  const [transformations, setTransformations] = useState<Transformation[]>([])
+  const [destinations, setDestinations] = useState<Destination[]>([])
+  const [bins, setBins] = useState<CaptureBin[]>([])
 
   useEffect(() => {
     fetchTransformations()
@@ -22,11 +30,7 @@ export default function DashboardPage() {
 
   const fetchTransformations = async () => {
     try {
-      const res = await fetch('/api/v1/transformations')
-      if (res.ok) {
-        const data = await res.json()
-        setTransformations(data)
-      }
+      setTransformations(await listTransformations())
     } catch (e) {
       console.error('Failed to fetch transformations:', e)
     }
@@ -34,11 +38,7 @@ export default function DashboardPage() {
 
   const fetchDestinations = async () => {
     try {
-      const res = await fetch('/api/v1/destinations')
-      if (res.ok) {
-        const data = await res.json()
-        setDestinations(data)
-      }
+      setDestinations(await listDestinations())
     } catch (e) {
       console.error('Failed to fetch destinations:', e)
     }
@@ -46,11 +46,7 @@ export default function DashboardPage() {
 
   const fetchBins = async () => {
     try {
-      const res = await fetch('/api/v1/bins')
-      if (res.ok) {
-        const data = await res.json()
-        setBins(data)
-      }
+      setBins(await listBins())
     } catch (e) {
       console.error('Failed to fetch bins:', e)
     }
