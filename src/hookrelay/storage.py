@@ -953,6 +953,43 @@ class Storage:
         """)
         self._conn.commit()
 
+    def _init_transformations_table(self) -> None:
+        """Create the transformations table if it doesn't exist."""
+        self._conn.executescript("""
+            CREATE TABLE IF NOT EXISTS transformations (
+                transform_id TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                filters TEXT NOT NULL DEFAULT '[]',
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_transformations_name ON transformations(name);
+        """)
+        self._conn.commit()
+
+    def _init_destinations_table(self) -> None:
+        """Create the destinations table if it doesn't exist."""
+        self._conn.executescript("""
+            CREATE TABLE IF NOT EXISTS destinations (
+                destination_id TEXT PRIMARY KEY,
+                bin_id TEXT NOT NULL,
+                url TEXT NOT NULL,
+                transform_id TEXT,
+                signing_config TEXT NOT NULL DEFAULT '{}',
+                headers TEXT NOT NULL DEFAULT '{}',
+                retry_policy TEXT NOT NULL DEFAULT '{}',
+                enabled INTEGER NOT NULL DEFAULT 1,
+                weight INTEGER NOT NULL DEFAULT 1,
+                delivery_mode TEXT NOT NULL DEFAULT 'broadcast',
+                delivered_count INTEGER NOT NULL DEFAULT 0,
+                failed_count INTEGER NOT NULL DEFAULT 0,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_destinations_bin ON destinations(bin_id);
+        """)
+        self._conn.commit()
+
     def save_filter_set(
         self, name: str, channel: str, filter_expression: str
     ) -> str:

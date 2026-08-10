@@ -7,6 +7,7 @@ import os
 import tempfile
 import urllib.request
 from pathlib import Path
+from typing import Any
 from urllib.parse import urlparse
 
 import typer
@@ -955,3 +956,191 @@ def _insights_timeseries_cmd(
         typer.echo(f"Error: {exc}", err=True)
         raise typer.Exit(code=1)
     typer.echo(json.dumps(result, indent=2, default=str))
+
+
+# ============================================================
+# Transform commands (transformation engine, v1.8.0)
+# ============================================================
+
+
+def transform_test(filter_expr: str, payload_path: str) -> dict:
+    """Apply a JQ-style filter to a payload file and return the result.
+
+    Args:
+        filter_expr: JQ-style filter expression (e.g., '.added = "yes"').
+        payload_path: Path to JSON payload file.
+
+    Returns:
+        Transformed payload as a dict.
+    """
+    import json as json_mod
+
+    with open(payload_path) as f:
+        payload = json_mod.load(f)
+    from hookrelay.transforms.engine import preview_transformation
+
+    return preview_transformation([filter_expr], payload)
+
+
+transform_app = typer.Typer(
+    name="transform",
+    help="Test and preview payload transformations.",
+    no_args_is_help=True,
+)
+app.add_typer(transform_app, name="transform")
+
+
+@transform_app.command("test")
+def _transform_test_cmd(
+    filter_expr: str = typer.Argument(..., help="JQ-style filter expression"),
+    payload: str = typer.Argument(..., help="Path to JSON payload file"),
+):
+    """Apply a filter to a payload and print the transformed result."""
+    result = transform_test(filter_expr, payload)
+    typer.echo(json.dumps(result, indent=2, default=str))
+
+
+# ============================================================
+# Destination commands (multi-destination routing, v1.8.0)
+# ============================================================
+
+
+def destination_add(
+    bin_id: str,
+    url: str,
+    *,
+    transform_id: str | None = None,
+    signing_config: dict[str, Any] | None = None,
+    headers: dict[str, str] | None = None,
+    retry_policy: dict[str, Any] | None = None,
+    enabled: bool = True,
+    weight: int = 1,
+    delivery_mode: str = "broadcast",
+) -> dict:
+    """Add a destination to a bin and return its record.
+
+    Args:
+        bin_id: Capture bin identifier.
+        url: Target URL for forwarded webhooks.
+        transform_id: Optional transformation rule id.
+        signing_config: Optional signing config (algorithm, secret).
+        headers: Extra headers to forward.
+        retry_policy: Per-destination retry policy.
+        enabled: Whether the destination is active.
+        weight: Weight for weighted delivery mode.
+        delivery_mode: Default delivery mode.
+
+    Returns:
+        The created destination record.
+    """
+    from hookrelay.routing.destination_store import DestinationStore
+
+    store = _get_storage()
+    dest_store = DestinationStore(store)
+    return dest_store.create(
+        bin_id=bin_id,
+        url=url,
+        transform_id=transform_id,
+        signing_config=signing_config,
+        headers=headers,
+        retry_policy=retry_policy,
+        enabled=enabled,
+        weight=weight,
+        delivery_mode=delivery_mode,
+    )
+
+
+def destination_list(bin_id: str) -> list[dict]:
+    """List all destinations for a bin."""
+    from hookrelay.routing.destination_store import DestinationStore
+
+    store = _get_storage()
+    dest_store = DestinationStore(store)
+    return dest_store.list(bin_id=bin_id)
+
+
+def destination_delete(destination_id: str) -> bool:
+    """Delete a destination; return True if deleted."""
+    from hookrelay.routing.destination_store import DestinationStore
+
+    store = _get_storage()
+    dest_store = DestinationStore(store)
+    return dest_store.delete(destination_id)
+
+
+destination_app = typer.Typer(
+    name="destination",
+    help="Manage multi-destination forwarding targets.",
+    no_args_is_help=True,
+)
+app.add_typer(destination_app, name="destination")
+
+# Module-level sentinel so the repeatable --header option stays ruff-clean (B008).
+_HEADER_OPTION = typer.Option(None, "--header", "-H", help="Extra header (repeatable, key:value)")
+
+
+@destination_app.command("add")
+def _destination_add_cmd(
+    bin_id: str = typer.Argument(..., help="Capture bin ID"),
+    url: str = typer.Argument(..., help="Target URL"),
+    transform_id: str | None = typer.Option(None, "--transform", help="Transformation rule ID"),
+    signing_algorithm: str | None = typer.Option(None, "--signing-algorithm", help="Signing algorithm (svix/hookdeck/github/custom)"),
+    signing_secret: str | None = typer.Option(None, "--signing-secret", help="Signing secret"),
+    header: list[str] | None = _HEADER_OPTION,
+    retry_policy: str | None = typer.Option(None, "--retry-policy", help="Retry policy as JSON string"),
+    enabled: bool = typer.Option(True, "--enabled/--disabled", help="Enable/disable destination"),
+    weight: int = typer.Option(1, "--weight", help="Weight for weighted delivery mode"),
+    delivery_mode: str = typer.Option("broadcast", "--mode", help="Delivery mode (broadcast/round_robin/weighted)"),
+):
+    """Add a destination to a bin and print its JSON record."""
+    import json as json_mod
+
+    signing_config = None
+    if signing_algorithm and signing_secret:
+        signing_config = {"algorithm": signing_algorithm, "secret": signing_secret}
+    headers = {}
+    if header:
+        for h in header:
+            if ":" in h:
+                k, v = h.split(":", 1)
+                headers[k.strip()] = v.strip()
+    rp = None
+    if retry_policy:
+        rp = json_mod.loads(retry_policy)
+    result = destination_add(
+        bin_id=bin_id,
+        url=url,
+        transform_id=transform_id,
+        signing_config=signing_config,
+        headers=headers if headers else None,
+        retry_policy=rp,
+        enabled=enabled,
+        weight=weight,
+        delivery_mode=delivery_mode,
+    )
+    typer.echo(json.dumps(result, indent=2, default=str))
+
+
+@destination_app.command("list")
+def _destination_list_cmd(
+    bin_id: str = typer.Argument(..., help="Capture bin ID"),
+):
+    """List all destinations for a bin."""
+    result = destination_list(bin_id)
+    if not result:
+        typer.echo("No destinations found.")
+        return
+    typer.echo(json.dumps(result, indent=2, default=str))
+
+
+@destination_app.command("delete")
+def _destination_delete_cmd(
+    destination_id: str = typer.Argument(..., help="Destination ID"),
+):
+    """Delete a destination."""
+    deleted = destination_delete(destination_id)
+    if deleted:
+        typer.echo(f"Destination '{destination_id}' deleted.")
+    else:
+        typer.echo(f"Destination '{destination_id}' not found.", err=True)
+        raise typer.Exit(code=1)

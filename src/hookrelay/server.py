@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+from typing import Any
 
 from fastapi import FastAPI, Request, WebSocket
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
@@ -141,6 +142,39 @@ class _ValidateRequest(BaseModel):
     draft: str = "2020-12"
 
 
+class _CreateTransformRequest(BaseModel):
+    name: str
+    filters: list[str] = []
+
+
+class _UpdateTransformRequest(BaseModel):
+    name: str | None = None
+    filters: list[str] | None = None
+
+
+class _CreateDestinationRequest(BaseModel):
+    bin_id: str
+    url: str
+    transform_id: str | None = None
+    signing_config: dict[str, Any] | None = None
+    headers: dict[str, str] | None = None
+    retry_policy: dict[str, Any] | None = None
+    enabled: bool = True
+    weight: int = 1
+    delivery_mode: str = "broadcast"
+
+
+class _UpdateDestinationRequest(BaseModel):
+    url: str | None = None
+    transform_id: str | None = None
+    signing_config: dict[str, Any] | None = None
+    headers: dict[str, str] | None = None
+    retry_policy: dict[str, Any] | None = None
+    enabled: bool | None = None
+    weight: int | None = None
+    delivery_mode: str | None = None
+
+
 class _EnqueueDeliveryRequest(BaseModel):
     request_id: str
     endpoint_id: str
@@ -252,7 +286,6 @@ def _register_delivery_api_routes(app: FastAPI) -> None:
     from fastapi import HTTPException
 
     from hookrelay.config.retry_policy import RetryPolicy
-    from hookrelay.dashboard.service import DashboardService
     from hookrelay.delivery import DeadLetterQueue, DeliveryStatus, RetryQueue
     from hookrelay.delivery.tracker import DeliveryTracker
 
@@ -359,26 +392,113 @@ def _register_delivery_api_routes(app: FastAPI) -> None:
         )
         return {"delivery_id": delivery_id, "status": "pending"}
 
-    @app.get("/api/dashboard/metrics")
-    async def api_dashboard_metrics(
-        window_minutes: int = 60,
-        bucket_minutes: int = 5,
-    ):
-        if window_minutes < 1 or window_minutes > 1440:
-            raise HTTPException(status_code=422, detail="window_minutes must be in [1, 1440]")
-        if bucket_minutes < 1 or bucket_minutes > window_minutes:
-            raise HTTPException(status_code=422, detail="bucket_minutes must be in [1, window_minutes]")
+
+def _register_transform_api_routes(app: FastAPI) -> None:
+    """Register /api/v1/transformations CRUD endpoints."""
+    from fastapi import HTTPException
+
+    from hookrelay.transforms.store import TransformationStore
+
+    def _get_transform_store() -> TransformationStore:
         store = _get_or_create_storage()
-        service = DashboardService(store)
-        return {
-            "summary": service.summary(window_minutes=window_minutes),
-            "time_series": service.time_series(
-                window_minutes=window_minutes, bucket_minutes=bucket_minutes
-            ),
-            "endpoint_breakdown": service.endpoint_breakdown(
-                window_minutes=window_minutes
-            ),
-        }
+        return TransformationStore(store)
+
+    @app.post("/api/v1/transformations", status_code=201)
+    async def api_create_transform(req: _CreateTransformRequest):
+        transform_store = _get_transform_store()
+        try:
+            return transform_store.create(req.name, req.filters)
+        except ValueError as e:
+            raise HTTPException(status_code=422, detail=str(e))
+
+    @app.get("/api/v1/transformations")
+    async def api_list_transforms():
+        transform_store = _get_transform_store()
+        return transform_store.list()
+
+    @app.get("/api/v1/transformations/{transform_id}")
+    async def api_get_transform(transform_id: str):
+        transform_store = _get_transform_store()
+        result = transform_store.get(transform_id)
+        if result is None:
+            raise HTTPException(status_code=404, detail="Transformation not found")
+        return result
+
+    @app.put("/api/v1/transformations/{transform_id}")
+    async def api_update_transform(transform_id: str, req: _UpdateTransformRequest):
+        transform_store = _get_transform_store()
+        updates = {k: v for k, v in req.model_dump(exclude_none=True).items() if v is not None}
+        if not updates:
+            raise HTTPException(status_code=400, detail="No fields to update")
+        result = transform_store.update(transform_id, **updates)
+        if result is None:
+            raise HTTPException(status_code=404, detail="Transformation not found")
+        return result
+
+    @app.delete("/api/v1/transformations/{transform_id}", status_code=204)
+    async def api_delete_transform(transform_id: str):
+        transform_store = _get_transform_store()
+        if not transform_store.delete(transform_id):
+            raise HTTPException(status_code=404, detail="Transformation not found")
+
+
+def _register_destination_api_routes(app: FastAPI) -> None:
+    """Register /api/v1/destinations CRUD endpoints."""
+    from fastapi import HTTPException
+
+    from hookrelay.routing.destination_store import DestinationStore
+
+    def _get_destination_store() -> DestinationStore:
+        store = _get_or_create_storage()
+        return DestinationStore(store)
+
+    @app.post("/api/v1/destinations", status_code=201)
+    async def api_create_destination(req: _CreateDestinationRequest):
+        destination_store = _get_destination_store()
+        try:
+            return destination_store.create(
+                bin_id=req.bin_id,
+                url=req.url,
+                transform_id=req.transform_id,
+                signing_config=req.signing_config,
+                headers=req.headers,
+                retry_policy=req.retry_policy,
+                enabled=req.enabled,
+                weight=req.weight,
+                delivery_mode=req.delivery_mode,
+            )
+        except ValueError as e:
+            raise HTTPException(status_code=422, detail=str(e))
+
+    @app.get("/api/v1/destinations")
+    async def api_list_destinations(bin_id: str | None = None):
+        destination_store = _get_destination_store()
+        return destination_store.list(bin_id=bin_id)
+
+    @app.get("/api/v1/destinations/{destination_id}")
+    async def api_get_destination(destination_id: str):
+        destination_store = _get_destination_store()
+        result = destination_store.get(destination_id)
+        if result is None:
+            raise HTTPException(status_code=404, detail="Destination not found")
+        return result
+
+    @app.put("/api/v1/destinations/{destination_id}")
+    async def api_update_destination(destination_id: str, req: _UpdateDestinationRequest):
+        destination_store = _get_destination_store()
+        updates = {k: v for k, v in req.model_dump(exclude_none=True).items() if v is not None}
+        if not updates:
+            raise HTTPException(status_code=400, detail="No fields to update")
+        result = destination_store.update(destination_id, **updates)
+        if result is None:
+            raise HTTPException(status_code=404, detail="Destination not found")
+        return result
+
+    @app.delete("/api/v1/destinations/{destination_id}", status_code=204)
+    async def api_delete_destination(destination_id: str):
+        destination_store = _get_destination_store()
+        if not destination_store.delete(destination_id):
+            raise HTTPException(status_code=404, detail="Destination not found")
 
 
 def _register_webhook_route(app: FastAPI) -> None:
@@ -637,6 +757,12 @@ def create_app() -> FastAPI:
     insights_router = create_insights_router()
     for route in insights_router.routes:
         app.router.routes.append(route)
+
+    # Register transformation CRUD API routes
+    _register_transform_api_routes(app)
+
+    # Register destination CRUD API routes
+    _register_destination_api_routes(app)
 
     # Start the alert evaluator daemon thread (blocking notifiers must not
     # live on the event loop). Interval comes from app_settings so it can be
