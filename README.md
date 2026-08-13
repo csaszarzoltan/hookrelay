@@ -677,3 +677,11 @@ HOOKRELAY_BACKUP_ENCRYPTION_KEY="..." \
 ```
 
 Losing the encryption key makes encrypted backups unrecoverable. Store the key separately from both the live database and backup files.
+
+## Dokumentáció
+
+- [Engineering Standards](docs/engineering-standards.md) — kötelező olvasmány kódírás előtt
+- [Döntések / tanulságok](docs/decisions/) — javított hibák és anti-minták
+- [Specifikációk](docs/specs/) — feature-ök kanonikus követelményei
+
+- [Módszertan](docs/METHODOLOGY.md) — a lab fejlesztési módszertana (kötelező olvasmány)
