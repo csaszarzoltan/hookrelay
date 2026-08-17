@@ -270,7 +270,7 @@ class TestMigration6Interface:
 
     def test_schema_version_is_6_on_fresh_db(self, tmp_path):
         store = Storage(str(tmp_path / "fresh.db"))
-        assert store.schema_version == 6
+        assert store.schema_version == 8
 
 
 # ============================================================
@@ -296,9 +296,9 @@ class TestAlertRulesTable:
     def test_reinit_is_idempotent(self, tmp_path):
         path = str(tmp_path / "idem.db")
         first = Storage(path)
-        assert first.schema_version == 6
+        assert first.schema_version == 8
         second = Storage(path)
-        assert second.schema_version == 6
+        assert second.schema_version == 8
         rows = second._conn.execute(
             "SELECT COUNT(*) AS n FROM schema_migrations WHERE version = 6"
         ).fetchone()
@@ -324,7 +324,7 @@ class TestAlertRulesTable:
         conn.close()
 
         upgraded = Storage(path)
-        assert upgraded.schema_version == 6
+        assert upgraded.schema_version == 8
         names = [m["name"] for m in upgraded.migration_history()]
         assert "alert-rules" in names
 

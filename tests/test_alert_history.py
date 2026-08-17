@@ -96,7 +96,7 @@ class TestAlertHistoryTable:
             assert columns[name] == expected_type
 
     def test_schema_version_is_7(self, store):
-        assert store.schema_version == 7
+        assert store.schema_version == 8
 
     def test_migration_7_recorded_once(self, store):
         entries = [m for m in store.migration_history() if m["version"] == 7]
@@ -123,7 +123,7 @@ class TestAlertHistoryTable:
         conn.close()
 
         upgraded = Storage(path)
-        assert upgraded.schema_version == 7
+        assert upgraded.schema_version == 8
         names = [m["name"] for m in upgraded.migration_history()]
         assert "alert-history" in names
 

@@ -56,6 +56,14 @@ class Storage:
             self._conn.execute(
                 "ALTER TABLE delivery_attempts ADD COLUMN endpoint_id TEXT"
             )
+        if "transform_before" not in cols:
+            self._conn.execute(
+                "ALTER TABLE delivery_attempts ADD COLUMN transform_before BLOB"
+            )
+        if "transform_after" not in cols:
+            self._conn.execute(
+                "ALTER TABLE delivery_attempts ADD COLUMN transform_after BLOB"
+            )
         self._conn.commit()
 
     def _init_schema(self) -> None:
@@ -116,7 +124,9 @@ class Storage:
                 response_headers TEXT NOT NULL DEFAULT '{}',
                 response_body TEXT,
                 response_body_truncated INTEGER NOT NULL DEFAULT 0,
-                attempted_at TEXT NOT NULL
+                attempted_at TEXT NOT NULL,
+                transform_before BLOB,
+                transform_after BLOB
             );
             CREATE INDEX IF NOT EXISTS idx_delivery_request
                 ON delivery_attempts(request_id, attempted_at DESC);
@@ -510,6 +520,8 @@ class Storage:
         response_body: str | bytes | None = None,
         delivery_id: str | None = None,
         endpoint_id: str | None = None,
+        transform_before: bytes | None = None,
+        transform_after: bytes | None = None,
     ) -> str:
         """Persist a forwarding outcome with bounded, redacted response data."""
         sensitive = {"authorization", "proxy-authorization", "cookie", "set-cookie", "x-api-key", "x-auth-token", "api-key"}
@@ -533,12 +545,12 @@ class Storage:
                (attempt_id, request_id, delivery_id, endpoint_id, channel,
                 target_url, status, response_status, duration_ms, error,
                 response_headers, response_body, response_body_truncated,
-                attempted_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                attempted_at, transform_before, transform_after)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (attempt_id, request_id, delivery_id, endpoint_id, channel,
              target_url, status, response_status, duration_ms, error,
              json.dumps(headers), body_text, 1 if truncated else 0,
-             attempted_at),
+             attempted_at, transform_before, transform_after),
         )
         self._conn.commit()
         return attempt_id

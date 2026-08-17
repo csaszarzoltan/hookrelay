@@ -31,9 +31,11 @@ from __future__ import annotations
 import json
 import time
 from typing import Any
+from uuid import uuid4
 
 import requests
 
+from hookrelay.delivery.retry_queue import RetryQueue
 from hookrelay.routing.destination import (
     DeliveryMode,
     Destination,
@@ -138,11 +140,23 @@ def _deliver_to_destination(
     method: str,
     body: bytes,
     timeout: float = 30.0,
+    retry_policy: dict[str, Any] | None = None,
+    raw_body: bytes | None = None,
 ) -> dict[str, Any]:
     """Send one payload to one destination; record attempt + counters.
 
     Returns a result dict with ``destination_id``, ``status``
-    (``delivered`` | ``failed``), ``status_code`` and ``error``.
+    (``delivered`` | ``failed`` | ``retry_enqueued``), ``status_code``
+    and ``error``.
+
+    When *retry_policy* is provided and the delivery fails, the delivery is
+    enqueued into the :class:`RetryQueue` for exponential-backoff retry
+    instead of being silently dropped.  Without *retry_policy* the
+    behaviour is the same fire-and-forget as before.
+
+    When *raw_body* differs from *body* (i.e. a transformation was
+    applied), both payloads are recorded in the audit trail columns
+    ``transform_before`` / ``transform_after`` on the delivery attempt.
     """
     dest_store = DestinationStore(store)
     outgoing_headers = {
@@ -152,6 +166,13 @@ def _deliver_to_destination(
     }
     outgoing_headers.update(_signing_headers(signing_config, body))
 
+    # Compute audit trail payloads: only when transform changed the body.
+    transform_before: bytes | None = None
+    transform_after: bytes | None = None
+    if raw_body is not None and raw_body != body:
+        transform_before = raw_body
+        transform_after = body
+
     started = time.perf_counter()
     try:
         response = requests.request(
@@ -159,6 +180,45 @@ def _deliver_to_destination(
         )
     except requests.RequestException as exc:
         latency_ms = (time.perf_counter() - started) * 1000.0
+
+        # --- Retry path --------------------------------------------------
+        # Empty dict {} means no retry policy was explicitly set (the store
+        # serialises None as "{}"); only enqueue when the policy is non-empty.
+        if retry_policy:
+            delivery_id = uuid4().hex
+            store.store_delivery_attempt(
+                request_id=request_id,
+                channel=channel,
+                status="transport_error",
+                target_url=url,
+                error=str(exc),
+                duration_ms=latency_ms,
+                endpoint_id=destination_id,
+                delivery_id=delivery_id,
+                transform_before=transform_before,
+                transform_after=transform_after,
+            )
+            dest_store.increment_failed(destination_id)
+            queue = RetryQueue(store)
+            queue.enqueue(
+                delivery_id=delivery_id,
+                request_id=request_id,
+                endpoint_id=destination_id,
+                target_url=url,
+                method=method,
+                headers=headers,
+                body=body,
+                policy=_policy_from_dict(retry_policy),
+            )
+            return {
+                "destination_id": destination_id,
+                "status": "retry_enqueued",
+                "status_code": 0,
+                "error": str(exc),
+                "delivery_id": delivery_id,
+            }
+
+        # --- Fire-and-forget path (no retry policy) ----------------------
         store.store_delivery_attempt(
             request_id=request_id,
             channel=channel,
@@ -167,6 +227,8 @@ def _deliver_to_destination(
             error=str(exc),
             duration_ms=latency_ms,
             endpoint_id=destination_id,
+            transform_before=transform_before,
+            transform_after=transform_after,
         )
         dest_store.increment_failed(destination_id)
         return {
@@ -177,6 +239,8 @@ def _deliver_to_destination(
         }
 
     latency_ms = (time.perf_counter() - started) * 1000.0
+
+    # --- Successful delivery ---------------------------------------------
     store.store_delivery_attempt(
         request_id=request_id,
         channel=channel,
@@ -186,6 +250,8 @@ def _deliver_to_destination(
         duration_ms=latency_ms,
         response_body=response.text,
         endpoint_id=destination_id,
+        transform_before=transform_before,
+        transform_after=transform_after,
     )
     dest_store.increment_delivered(destination_id)
     return {
@@ -193,6 +259,31 @@ def _deliver_to_destination(
         "status": "delivered",
         "status_code": response.status_code,
     }
+
+
+def _policy_from_dict(d: dict[str, Any]) -> Any:
+    """Wrap a plain dict as a duck-typed retry policy for RetryQueue.
+
+    The RetryQueue accepts a duck-typed policy with attributes
+    ``max_retries``, ``backoff_factor``, ``base_delay_seconds``,
+    ``max_backoff_seconds``, and ``jitter``.  This helper creates a
+    lightweight object that exposes only the keys present in *d*.
+    """
+
+    class _Policy:
+        pass
+
+    p = _Policy()
+    for key in (
+        "max_retries",
+        "backoff_factor",
+        "base_delay_seconds",
+        "max_backoff_seconds",
+        "jitter",
+    ):
+        if key in d:
+            setattr(p, key, d[key])
+    return p
 
 
 def deliver_captured_request(
@@ -256,6 +347,8 @@ def deliver_captured_request(
                 method=method,
                 body=body,
                 timeout=timeout,
+                retry_policy=record.get("retry_policy"),
+                raw_body=raw_body,
             )
         )
     return results

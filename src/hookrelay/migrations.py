@@ -5,7 +5,7 @@ from __future__ import annotations
 import sqlite3
 from datetime import UTC, datetime
 
-CURRENT_SCHEMA_VERSION = 7
+CURRENT_SCHEMA_VERSION = 8
 
 _MIGRATIONS: dict[int, tuple[str, str]] = {
     1: (
@@ -95,6 +95,12 @@ _MIGRATIONS: dict[int, tuple[str, str]] = {
         );
         CREATE INDEX IF NOT EXISTS idx_alert_history_fired_at
             ON alert_history(fired_at DESC);""",
+    ),
+    8: (
+        "transform-audit-trail",
+        """CREATE TABLE IF NOT EXISTS _mig8_dummy (dummy INTEGER);
+        DROP TABLE IF EXISTS _mig8_dummy;
+        """,
     ),
 }
 
