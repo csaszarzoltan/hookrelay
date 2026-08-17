@@ -40,6 +40,7 @@ from hookrelay.routing.destination import (
     MultiDestinationRouter,
 )
 from hookrelay.routing.destination_store import DestinationStore
+from hookrelay.routing.rules import RouterEngine
 from hookrelay.security.outgoing import OutgoingSigner
 from hookrelay.storage import Storage
 from hookrelay.transforms.engine import TransformationEngine
@@ -50,6 +51,49 @@ _STRIPPED_FORWARD_HEADERS = frozenset(
 )
 
 _DEFAULT_MODE = DeliveryMode.BROADCAST
+
+
+def _evaluate_routing(
+    storage: Storage, bin_id: str, request_data: dict[str, Any]
+) -> list[str] | None:
+    """Evaluate conditional routing rules for *bin_id*.
+
+    Returns the list of ``target_destination_ids`` from the first
+    matched :class:`~hookrelay.routing.rules.RoutingRule`, or ``None``
+    when no rule matches (triggering the fallback broadcast).
+    """
+    from hookrelay.routing.rules import RoutingRule
+
+    # List routing rules for this bin (channel == bin_id), ordered by priority.
+    raw_rules = storage.list_routing_rules(channel=bin_id)
+    if not raw_rules:
+        return None  # no rules → broadcast
+
+    engine = RouterEngine()
+    for raw in raw_rules:
+        rule = RoutingRule(
+            rule_id=raw["rule_id"],
+            name=raw["name"],
+            enabled=raw.get("enabled", True),
+            priority=raw.get("priority", 100),
+            condition=raw.get("condition"),
+            target_endpoint=raw.get("target_endpoint"),
+            channel=raw.get("channel"),
+            max_forward_count=raw.get("max_forward_count"),
+            fallback=raw.get("fallback", False),
+            target_destination_ids=raw.get("target_destination_ids"),
+        )
+        engine.add_rule(rule)
+
+    results = engine.evaluate(channel=bin_id, request_data=request_data)
+    if not results:
+        return None  # no match → fallback broadcast
+
+    # Collect target_destination_ids from matched rules.
+    matched = results[0][0]  # first match (first-match-wins)
+    if matched.target_destination_ids:
+        return matched.target_destination_ids
+    return None  # rule matched but no target_destination_ids → broadcast
 
 
 def _destination_records(store: Storage, bin_id: str) -> list[dict[str, Any]]:
@@ -224,6 +268,23 @@ def deliver_captured_request(
         raise ValueError(f"Request {request_id} not found in bin {bin_id}")
 
     records = _destination_records(storage, bin_id)
+
+    # --- Conditional routing: evaluate rules before fan-out. ---------
+    # Build a request-like dict so the filter parser can inspect
+    # body, method, path, and headers via the standard dot-paths.
+    raw_body = captured.get("body", b"")
+    if isinstance(raw_body, str):
+        raw_body = raw_body.encode("utf-8")
+    _request_data: dict[str, Any] = {
+        "body": raw_body.decode("utf-8", errors="replace") if raw_body else "",
+        "method": captured.get("method", "POST"),
+        "path": captured.get("path", "/"),
+        "headers": captured.get("headers", {}),
+    }
+    _target_ids = _evaluate_routing(storage, bin_id, _request_data)
+    if _target_ids is not None:
+        records = [r for r in records if r["destination_id"] in _target_ids]
+
     router = _router_for(records)
     instructions = router.route({})
 
@@ -231,9 +292,6 @@ def deliver_captured_request(
     by_id = {r["destination_id"]: r for r in records}
 
     method = captured.get("method", "POST")
-    raw_body = captured.get("body", b"")
-    if isinstance(raw_body, str):
-        raw_body = raw_body.encode("utf-8")
 
     results: list[dict[str, Any]] = []
     for instruction in instructions:

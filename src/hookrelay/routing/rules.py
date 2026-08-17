@@ -39,6 +39,7 @@ class RoutingRule:
         channel: str | None = None,
         max_forward_count: int | None = None,
         fallback: bool = False,
+        target_destination_ids: list[str] | None = None,
         created_at: str | None = None,
     ) -> None:
         self.rule_id = rule_id
@@ -50,6 +51,7 @@ class RoutingRule:
         self.channel = channel
         self.max_forward_count = max_forward_count
         self.fallback = fallback
+        self.target_destination_ids = target_destination_ids
         self.created_at = created_at or datetime.now(
             UTC
         ).isoformat()
@@ -66,6 +68,7 @@ class RoutingRule:
             "channel": self.channel,
             "max_forward_count": self.max_forward_count,
             "fallback": self.fallback,
+            "target_destination_ids": self.target_destination_ids,
             "created_at": self.created_at,
         }
 
@@ -82,6 +85,7 @@ class RoutingRule:
             channel=data.get("channel"),
             max_forward_count=data.get("max_forward_count"),
             fallback=data.get("fallback", False),
+            target_destination_ids=data.get("target_destination_ids"),
             created_at=data.get("created_at"),
         )
 

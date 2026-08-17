@@ -29,6 +29,7 @@ class Storage:
         # table with the full column set.
         self._ensure_delivery_attempt_columns()
         self._init_schema()
+        self._init_filter_tables()
         run_migrations(self._conn)
         self._backfill_audit_hash_chain()
 
@@ -935,6 +936,7 @@ class Storage:
                 target_endpoint TEXT,
                 max_forward_count INTEGER,
                 fallback INTEGER NOT NULL DEFAULT 0,
+                target_destination_ids TEXT DEFAULT '[]',
                 created_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL
             );
@@ -1051,6 +1053,7 @@ class Storage:
         enabled: bool = True,
         max_forward_count: int | None = None,
         fallback: bool = False,
+        target_destination_ids: list[str] | None = None,
     ) -> str:
         """Save a routing rule and return its rule_id."""
         self._init_filter_tables()
@@ -1059,13 +1062,14 @@ class Storage:
         self._conn.execute(
             """INSERT INTO routing_rules
                (rule_id, name, channel, enabled, priority, condition,
-                target_endpoint, max_forward_count, fallback, created_at, updated_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                target_endpoint, max_forward_count, fallback, target_destination_ids, created_at, updated_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 rule_id, name, channel,
                 1 if enabled else 0,
                 priority, condition, target_endpoint,
                 max_forward_count, 1 if fallback else 0,
+                json.dumps(target_destination_ids or []),
                 now, now,
             ),
         )
@@ -1091,8 +1095,25 @@ class Storage:
             d = dict(r)
             d["enabled"] = bool(d["enabled"])
             d["fallback"] = bool(d["fallback"])
+            raw_dest = d.get("target_destination_ids", "[]")
+            d["target_destination_ids"] = json.loads(raw_dest) if isinstance(raw_dest, str) else raw_dest
             result.append(d)
         return result
+    def get_routing_rule(self, rule_id: str) -> dict[str, Any] | None:
+        """Load a routing rule by ID."""
+        self._init_filter_tables()
+        row = self._conn.execute(
+            "SELECT * FROM routing_rules WHERE rule_id = ?",
+            (rule_id,),
+        ).fetchone()
+        if row is None:
+            return None
+        d = dict(row)
+        d["enabled"] = bool(d["enabled"])
+        d["fallback"] = bool(d["fallback"])
+        raw_dest = d.get("target_destination_ids", "[]")
+        d["target_destination_ids"] = json.loads(raw_dest) if isinstance(raw_dest, str) else raw_dest
+        return d
 
     def update_routing_rule(
         self, rule_id: str, updates: dict[str, Any]
@@ -1107,6 +1128,7 @@ class Storage:
         allowed_fields = {
             "name", "channel", "enabled", "priority", "condition",
             "target_endpoint", "max_forward_count", "fallback",
+            "target_destination_ids",
         }
         # Map boolean fields to integers for SQLite
         field_map: dict[str, Any] = {}
@@ -1115,6 +1137,8 @@ class Storage:
                 continue
             if k in ("enabled", "fallback"):
                 field_map[k] = 1 if v else 0
+            elif k == "target_destination_ids":
+                field_map[k] = json.dumps(v if v is not None else [])
             else:
                 field_map[k] = v
         if not field_map:

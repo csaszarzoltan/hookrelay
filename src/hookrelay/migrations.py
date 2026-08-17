@@ -5,7 +5,7 @@ from __future__ import annotations
 import sqlite3
 from datetime import UTC, datetime
 
-CURRENT_SCHEMA_VERSION = 7
+CURRENT_SCHEMA_VERSION = 8
 
 _MIGRATIONS: dict[int, tuple[str, str]] = {
     1: (
@@ -95,6 +95,30 @@ _MIGRATIONS: dict[int, tuple[str, str]] = {
         );
         CREATE INDEX IF NOT EXISTS idx_alert_history_fired_at
             ON alert_history(fired_at DESC);""",
+    ),
+    8: (
+        "routing-rules-destinations",
+        """CREATE TABLE IF NOT EXISTS routing_rules (
+            rule_id TEXT PRIMARY KEY,
+            name TEXT NOT NULL,
+            channel TEXT NOT NULL,
+            enabled INTEGER NOT NULL DEFAULT 1,
+            priority INTEGER NOT NULL DEFAULT 100,
+            condition TEXT,
+            target_endpoint TEXT,
+            max_forward_count INTEGER,
+            fallback INTEGER NOT NULL DEFAULT 0,
+            target_destination_ids TEXT DEFAULT '[]',
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_routing_rules_channel ON routing_rules(channel);"""
+        # For existing databases: the column may already exist (no-op) or be
+        # missing.  ALTER TABLE ADD COLUMN is idempotent when the column is
+        # already present in SQLite ≥ 3.35.0; for older versions we swallow
+        # the harmless "duplicate column" error.
+        + """;
+        SELECT 1;  -- placeholder; actual ALTER handled in Python""",
     ),
 }
 

@@ -192,6 +192,26 @@ class _RecordAttemptRequest(BaseModel):
     response_status: int | None = None
     duration_ms: float | None = None
     error: str | None = None
+class _CreateRoutingRuleRequest(BaseModel):
+    name: str
+    condition: str | None = None
+    target_endpoint: str | None = None
+    priority: int = 100
+    enabled: bool = True
+    max_forward_count: int | None = None
+    fallback: bool = False
+    target_destination_ids: list[str] | None = None
+
+
+class _UpdateRoutingRuleRequest(BaseModel):
+    name: str | None = None
+    condition: str | None = None
+    target_endpoint: str | None = None
+    priority: int | None = None
+    enabled: bool | None = None
+    max_forward_count: int | None = None
+    fallback: bool | None = None
+    target_destination_ids: list[str] | None = None
 
 
 def _register_schema_api_routes(app: FastAPI) -> None:
@@ -523,6 +543,67 @@ def _register_destination_api_routes(app: FastAPI) -> None:
             raise HTTPException(status_code=404, detail="Destination not found")
 
 
+def _register_routing_rule_api_routes(app: FastAPI) -> None:
+    """Register /api/bins/{bin_id}/routing-rules CRUD endpoints."""
+    from fastapi import HTTPException
+
+    from hookrelay.routing.destination_store import DestinationStore
+
+    def _get_store() -> Storage:
+        return _get_or_create_storage()
+
+    @app.post("/api/bins/{bin_id}/routing-rules", status_code=201)
+    async def api_create_routing_rule(bin_id: str, req: _CreateRoutingRuleRequest):
+        store = _get_store()
+        # Validate destination IDs exist if provided.
+        if req.target_destination_ids:
+            dest_store = DestinationStore(store)
+            for did in req.target_destination_ids:
+                if dest_store.get(did) is None:
+                    raise HTTPException(status_code=404, detail=f"Destination {did} not found")
+        rule_id = store.save_routing_rule(
+            name=req.name,
+            channel=bin_id,
+            condition=req.condition,
+            target_endpoint=req.target_endpoint,
+            priority=req.priority,
+            enabled=req.enabled,
+            max_forward_count=req.max_forward_count,
+            fallback=req.fallback,
+            target_destination_ids=req.target_destination_ids,
+        )
+        return store.get_routing_rule(rule_id)
+
+    @app.get("/api/bins/{bin_id}/routing-rules")
+    async def api_list_routing_rules(bin_id: str):
+        store = _get_store()
+        return store.list_routing_rules(channel=bin_id)
+
+    @app.put("/api/routing-rules/{rule_id}")
+    async def api_update_routing_rule(rule_id: str, req: _UpdateRoutingRuleRequest):
+        store = _get_store()
+        existing = store.get_routing_rule(rule_id)
+        if existing is None:
+            raise HTTPException(status_code=404, detail="Routing rule not found")
+        updates = {k: v for k, v in req.model_dump().items() if v is not None}
+        if not updates:
+            raise HTTPException(status_code=400, detail="No fields to update")
+        # Validate destination IDs if updating.
+        if updates.get("target_destination_ids"):
+            dest_store = DestinationStore(store)
+            for did in updates["target_destination_ids"]:
+                if dest_store.get(did) is None:
+                    raise HTTPException(status_code=404, detail=f"Destination {did} not found")
+        store.update_routing_rule(rule_id, updates)
+        return store.get_routing_rule(rule_id)
+
+    @app.delete("/api/routing-rules/{rule_id}", status_code=204)
+    async def api_delete_routing_rule(rule_id: str):
+        store = _get_store()
+        if not store.delete_routing_rule(rule_id):
+            raise HTTPException(status_code=404, detail="Routing rule not found")
+
+
 def _register_webhook_route(app: FastAPI) -> None:
     """Register the webhook ingestion endpoint."""
 
@@ -785,6 +866,9 @@ def create_app() -> FastAPI:
 
     # Register destination CRUD API routes
     _register_destination_api_routes(app)
+
+    # Register routing rule CRUD API routes
+    _register_routing_rule_api_routes(app)
 
     # Start the alert evaluator daemon thread (blocking notifiers must not
     # live on the event loop). Interval comes from app_settings so it can be
