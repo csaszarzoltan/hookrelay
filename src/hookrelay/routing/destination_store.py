@@ -64,6 +64,77 @@ def validate_signing_config(signing_config: dict[str, Any] | None) -> dict[str, 
     return dict(signing_config)
 
 
+def validate_retry_policy(policy: dict[str, Any] | None) -> dict[str, Any] | None:
+    """Validate a destination's per-destination retry policy.
+
+    When *policy* is not ``None``, each **present** field is validated against
+    the ranges expected by :class:`hookrelay.delivery.retry_queue.RetryQueue`.
+    Missing fields are left for the queue to fill with defaults (partial
+    policies are permitted).
+
+    Returns:
+        The validated policy dict, or ``None`` if no policy was given.
+
+    Raises:
+        TypeError: If *policy* is not a dict or ``None``.
+        ValueError: If any present field is out of the accepted range.
+    """
+    if policy is None:
+        return None
+    if not isinstance(policy, dict):
+        raise TypeError("retry_policy must be an object")
+    if not policy:
+        # Empty dict means "use defaults" — equivalent to None.
+        return None
+
+    validated = dict(policy)
+
+    if "max_retries" in validated:
+        v = validated["max_retries"]
+        if not isinstance(v, int) or isinstance(v, bool):
+            raise ValueError("retry_policy.max_retries must be an integer")
+        if v < 1 or v > 20:
+            raise ValueError(
+                "retry_policy.max_retries must be between 1 and 20"
+            )
+
+    if "base_delay_seconds" in validated:
+        v = validated["base_delay_seconds"]
+        if not isinstance(v, (int, float)) or isinstance(v, bool):
+            raise ValueError(
+                "retry_policy.base_delay_seconds must be a number"
+            )
+        if v < 0.1 or v > 3600:
+            raise ValueError(
+                "retry_policy.base_delay_seconds must be between 0.1 and 3600"
+            )
+
+    if "backoff_factor" in validated:
+        v = validated["backoff_factor"]
+        if not isinstance(v, (int, float)) or isinstance(v, bool):
+            raise ValueError("retry_policy.backoff_factor must be a number")
+        if v < 1.0 or v > 10.0:
+            raise ValueError(
+                "retry_policy.backoff_factor must be between 1.0 and 10.0"
+            )
+
+    if "max_backoff_seconds" in validated:
+        v = validated["max_backoff_seconds"]
+        if not isinstance(v, (int, float)) or isinstance(v, bool):
+            raise ValueError(
+                "retry_policy.max_backoff_seconds must be a number"
+            )
+        if v < 1 or v > 86400:
+            raise ValueError(
+                "retry_policy.max_backoff_seconds must be between 1 and 86400"
+            )
+
+    if "jitter" in validated and not isinstance(validated["jitter"], bool):
+        raise ValueError("retry_policy.jitter must be a boolean")
+
+    return validated
+
+
 class DestinationStore:
     """SQLite-backed store for per-destination forwarding targets."""
 
@@ -116,6 +187,7 @@ class DestinationStore:
         if delivery_mode not in ("broadcast", "round_robin", "weighted"):
             raise ValueError("delivery_mode must be broadcast|round_robin|weighted")
         signing_config = validate_signing_config(signing_config)
+        retry_policy = validate_retry_policy(retry_policy)
 
         self._init_table()
         destination_id = uuid4().hex
@@ -217,6 +289,8 @@ class DestinationStore:
             raise ValueError("delivery_mode must be broadcast|round_robin|weighted")
         if signing_config is not None:
             signing_config = validate_signing_config(signing_config)
+        if retry_policy is not None:
+            retry_policy = validate_retry_policy(retry_policy)
 
         now = datetime.now(UTC).isoformat()
 
